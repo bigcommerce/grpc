@@ -15,6 +15,7 @@
 require_relative '../grpc'
 require_relative 'active_call'
 require_relative 'service'
+require_relative 'server_interceptor'
 require 'thread'
 
 # GRPC contains the General RPC module.
@@ -212,6 +213,7 @@ module GRPC
       # :stopped. State transitions can only proceed in that order.
       @running_state = :not_started
       @server = Core::Server.new(server_args)
+      @interceptors = {}
     end
 
     # stops a running server
@@ -374,7 +376,9 @@ module GRPC
             @pool.schedule(active_call) do |ac|
               c, mth = ac
               begin
-                rpc_descs[mth].run_server_method(c, rpc_handlers[mth])
+                intercept(@interceptors.values.dup, c, mth) do
+                  rpc_descs[mth].run_server_method(c, rpc_handlers[mth])
+                end
               rescue StandardError
                 c.send_status(GRPC::Core::StatusCodes::INTERNAL,
                               'Server handler failed')
@@ -422,7 +426,43 @@ module GRPC
       [c, mth]
     end
 
+    # Adds an interceptor to the server, which can be used to intercept incoming
+    # server calls
+    #
+    # @param [Symbol|String] name
+    # @param [GRPC::ServerInterceptor] interceptor
+    #
+    def add_interceptor(name, interceptor)
+      unless interceptor.is_a?(GRPC::ServerInterceptor)
+        fail ArgumentError, 'Interceptors must extend GRPC::ServerInterceptor'
+      end
+
+      @interceptors[name.to_sym] = interceptor
+    end
+
     protected
+
+    # intercept the call and fire out to interceptors in a FIFO execution
+    def intercept(interceptors, c, mth, &_)
+      return yield if interceptors.none?
+
+      i = interceptors.pop
+      return yield unless i
+
+      i.call(c, mth, rpc_descs[mth], rpc_handlers[mth]) do
+        if interceptors.any?
+          intercept(interceptors, c, mth) do
+            yield
+          end
+        else
+          yield
+        end
+      end
+    end
+
+    def interceptors
+      @interceptors ||= {}
+    end
 
     def rpc_descs
       @rpc_descs ||= {}

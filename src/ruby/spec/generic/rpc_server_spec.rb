@@ -13,6 +13,7 @@
 # limitations under the License.
 
 require 'grpc'
+require 'spec_helper'
 
 def load_test_certs
   test_root = File.join(File.dirname(File.dirname(__FILE__)), 'testdata')
@@ -110,6 +111,14 @@ class SlowService
 end
 
 SlowStub = SlowService.rpc_stub_class
+
+# For testing server interceptors
+class TestServerInterceptor < GRPC::ServerInterceptor
+  def call(_call, method, _req, _resp, &_block)
+    GRPC.logger.info "Received intercept at method #{method}"
+    yield
+  end
+end
 
 describe GRPC::RpcServer do
   RpcServer = GRPC::RpcServer
@@ -503,6 +512,87 @@ describe GRPC::RpcServer do
         expect(op.trailing_metadata).to eq(wanted_trailers)
         @srv.stop
         t.join
+      end
+    end
+  end
+
+  describe '#add_interceptor' do
+    let(:server) { RpcServer.new }
+    let(:interceptor) { TestServerInterceptor.new }
+
+    subject { server.add_interceptor(:test, interceptor) }
+
+    context 'with an interceptor extending GRPC::ServerInterceptor' do
+      it 'should add the interceptor to the registry' do
+        subject
+        is = server.send(:interceptors)
+        expect(is.count).to eq 1
+        expect(is.first.first).to eq :test
+        expect(is.first.last).to eq interceptor
+      end
+    end
+
+    context 'with an interceptor not extending GRPC::ServerInterceptor' do
+      let(:interceptor) { Class }
+      it 'should raise an InvalidArgument exception' do
+        expect { subject }.to raise_error(ArgumentError)
+      end
+    end
+  end
+
+  describe 'interception' do
+    let(:interceptor) { TestServerInterceptor.new }
+    let(:request) { EchoMsg.new }
+    let(:service) { EchoService }
+
+    before(:each) do
+      build_rpc_server
+    end
+
+    context 'when an interceptor is added' do
+      before(:each) do
+        @server.add_interceptor(:test, interceptor)
+      end
+
+      it 'should be called', server: true do
+        expect(interceptor).to receive(:call).once.and_call_original
+
+        run_services_on_server(@server, services: [service]) do
+          stub = EchoStub.new(@host, :this_channel_is_insecure, **@client_opts)
+          expect(stub.an_rpc(request)).to be_a(EchoMsg)
+        end
+      end
+    end
+    context 'when multiple interceptors are added' do
+      let(:interceptor2) { TestServerInterceptor.new }
+      let(:interceptor3) { TestServerInterceptor.new }
+
+      before(:each) do
+        @server.add_interceptor(:test, interceptor)
+        @server.add_interceptor(:test2, interceptor2)
+        @server.add_interceptor(:test3, interceptor3)
+      end
+
+      it 'each should be called', server: true do
+        expect(interceptor).to receive(:call).once.and_call_original
+        expect(interceptor2).to receive(:call).once.and_call_original
+        expect(interceptor3).to receive(:call).once.and_call_original
+
+        run_services_on_server(@server, services: [service]) do
+          stub = EchoStub.new(@host, :this_channel_is_insecure, **@client_opts)
+          expect(stub.an_rpc(request)).to be_a(EchoMsg)
+        end
+      end
+    end
+
+    context 'when an interceptor is not added' do
+      it 'should not be called', server: true do
+        expect(interceptor).to_not receive(:call)
+
+        run_services_on_server(@server, services: [service]) do
+          stub = EchoStub.new(@host, :this_channel_is_insecure, **@client_opts)
+          expect(stub.an_rpc(request)).to be_a(EchoMsg)
+        end
       end
     end
   end
