@@ -18,38 +18,6 @@ require 'timeout'
 include Timeout
 include GRPC::Core
 
-# A test message
-class EchoMsg
-  def self.marshal(_o)
-    ''
-  end
-
-  def self.unmarshal(_o)
-    EchoMsg.new
-  end
-end
-
-# A test service with an echo implementation.
-class EchoService
-  include GRPC::GenericService
-  rpc :an_rpc, EchoMsg, EchoMsg
-  attr_reader :received_md
-
-  def initialize(**kw)
-    @trailing_metadata = kw
-    @received_md = []
-  end
-
-  def an_rpc(req, call)
-    GRPC.logger.info('echo service received a request')
-    call.output_metadata.update(@trailing_metadata)
-    @received_md << call.metadata unless call.metadata.nil?
-    req
-  end
-end
-
-EchoStub = EchoService.rpc_stub_class
-
 def start_server(port = 0)
   @srv = GRPC::RpcServer.new(pool_size: 1)
   server_port = @srv.add_http2_port("localhost:#{port}", :this_port_is_insecure)

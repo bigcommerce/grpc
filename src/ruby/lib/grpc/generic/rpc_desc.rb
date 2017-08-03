@@ -72,18 +72,20 @@ module GRPC
       send_status(active_call, OK, 'OK', active_call.output_metadata)
     end
 
-    def run_server_method(active_call, mth)
-      # While a server method is running, it might be cancelled, its deadline
-      # might be reached, the handler could throw an unknown error, or a
-      # well-behaved handler could throw a StatusError.
-      if request_response?
-        handle_request_response(active_call, mth)
-      elsif client_streamer?
-        handle_client_streamer(active_call, mth)
-      elsif server_streamer?
-        handle_server_streamer(active_call, mth)
-      else  # is a bidi_stream
-        handle_bidi_streamer(active_call, mth)
+    def run_server_method(active_call, mth, interceptors = [])
+      intercept(interceptors, active_call, mth) do
+        # While a server method is running, it might be cancelled, its deadline
+        # might be reached, the handler could throw an unknown error, or a
+        # well-behaved handler could throw a StatusError.
+        if request_response?
+          handle_request_response(active_call, mth)
+        elsif client_streamer?
+          handle_client_streamer(active_call, mth)
+        elsif server_streamer?
+          handle_server_streamer(active_call, mth)
+        else  # is a bidi_stream
+          handle_bidi_streamer(active_call, mth)
+        end
       end
     rescue BadStatus => e
       # this is raised by handlers that want GRPC to send an application error
@@ -105,6 +107,30 @@ module GRPC
       GRPC.logger.warn("failed handler: #{active_call}; sending status:UNKNOWN")
       GRPC.logger.warn(e)
       send_status(active_call, UNKNOWN, "#{e.class}: #{e.message}")
+    end
+
+    ##
+    # Intercept the call and fire out to interceptors in a FIFO execution
+    #
+    # @param [Array<GRPC::Interceptor>] is
+    # @param [GRPC::ActiveCall] c
+    # @param [Symbol] mth
+    #
+    def intercept(is, c, mth)
+      return yield if is.none?
+
+      i = is.pop
+      return yield unless i
+
+      i.call(c, mth, self) do
+        if is.any?
+          intercept(is, c, mth) do
+            yield
+          end
+        else
+          yield
+        end
+      end
     end
 
     def assert_arity_matches(mth)

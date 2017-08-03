@@ -15,6 +15,7 @@
 require_relative '../grpc'
 require_relative 'active_call'
 require_relative 'service'
+require_relative 'interceptor_registry'
 require 'thread'
 
 # GRPC contains the General RPC module.
@@ -152,6 +153,8 @@ module GRPC
 
     def_delegators :@server, :add_http2_port
 
+    attr_reader :interceptors
+
     # Default thread pool size is 30
     DEFAULT_POOL_SIZE = 30
 
@@ -212,6 +215,7 @@ module GRPC
       # :stopped. State transitions can only proceed in that order.
       @running_state = :not_started
       @server = Core::Server.new(server_args)
+      @interceptors = InterceptorRegistry.new
     end
 
     # stops a running server
@@ -374,7 +378,11 @@ module GRPC
             @pool.schedule(active_call) do |ac|
               c, mth = ac
               begin
-                rpc_descs[mth].run_server_method(c, rpc_handlers[mth])
+                rpc_descs[mth].run_server_method(
+                  c,
+                  rpc_handlers[mth],
+                  interceptors.all.dup
+                )
               rescue StandardError
                 c.send_status(GRPC::Core::StatusCodes::INTERNAL,
                               'Server handler failed')
@@ -382,7 +390,7 @@ module GRPC
             end
           end
         rescue Core::CallError, RuntimeError => e
-          # these might happen for various reasonse.  The correct behaviour of
+          # these might happen for various reasons.  The correct behaviour of
           # the server is to log them and continue, if it's not shutting down.
           if running_state == :running
             GRPC.logger.warn("server call failed: #{e}")
