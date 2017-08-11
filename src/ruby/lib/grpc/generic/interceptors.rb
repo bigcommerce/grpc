@@ -41,4 +41,17 @@ module GRPC
       fail NotImplementedError, 'Extend call in inherited class'
     end
   end
+
+  class ClientInterceptor < Interceptor
+    def call(_call, _method)
+      yield
+    end
+  end
+
+  class InterceptedChannel < GRPC::Core::Channel
+
+    def create_call(parent_call, propagate_mask, method, host, deadline)
+      call = super(parent_call, propagate_mask, method, host, deadline)
+    end
+  end
 end
