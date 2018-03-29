@@ -145,7 +145,7 @@ void PrintService(const ServiceDescriptor* service,
   out->Outdent();
   out->Print("];\n");
   out->Outdent();
-  out->Print("};\n\n");
+  out->Print("}\n\n");
 
   out->Print(
       "/**\n * @param string $$hostname hostname\n"
