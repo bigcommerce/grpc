@@ -308,6 +308,15 @@ void PrintService(const ServiceDescriptor* service,
   out->Outdent();
   out->Print("}\n\n");
 
+  // getServiceName() -> string - The name of the gRPC service
+  map<grpc::string, grpc::string> service_vars;
+  service_vars["service_name"] = service->full_name();
+  out->Print("public function getServiceName() {\n");
+  out->Indent();
+  out->Print(service_vars, "return '$service_name$';\n");
+  out->Outdent();
+  out->Print("}\n\n");
+
   if (!is_server) {
     out->Print(
         "/**\n * @param string $$hostname hostname\n"
