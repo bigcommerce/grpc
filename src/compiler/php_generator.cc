@@ -275,10 +275,27 @@ void PrintService(const ServiceDescriptor* service,
   out->Print(GetPHPComments(service, " *").c_str());
   out->Print(" */\n");
   vars["name"] = GetPHPServiceClassname(service, class_suffix, is_server);
-  vars["extends"] = is_server ? "" : "extends \\Grpc\\BaseStub ";
+  vars["extends"] = is_server ? "" : "extends BaseStub ";
   out->Print(vars, "class $name$ $extends${\n\n");
   out->Indent();
   out->Indent();
+
+  out->Print("public function getExpectedResponseMessages() {\n");
+  out->Indent();
+  out->Print("return [\n");
+  out->Indent();
+  map<grpc::string, grpc::string> response_vars;
+  for (int i = 0; i < service->method_count(); i++) {
+    const Descriptor* output_type = service->method(i)->output_type();
+    response_vars["method_name"] = grpc_generator::LowercaseFirstLetter(service->method(i)->name());
+    response_vars["output_type_id"] = MessageIdentifierName(GeneratedClassName(output_type), output_type->file());
+    out->Print(response_vars, "'$method_name$' => '\\$output_type_id$',\n");
+  }
+  out->Outdent();
+  out->Print("];\n");
+  out->Outdent();
+  out->Print("}\n\n");
+
   if (!is_server) {
     out->Print(
         "/**\n * @param string $$hostname hostname\n"
@@ -331,6 +348,8 @@ std::string GenerateFile(const FileDescriptor* file,
     std::string php_namespace = PackageName(file);
     vars["package"] = php_namespace;
     out.Print(vars, "namespace $package$;\n\n");
+
+    out.Print("use \\Grpc\\BaseStub;\n\n");
 
     PrintService(service, class_suffix, is_server, &out);
   }
