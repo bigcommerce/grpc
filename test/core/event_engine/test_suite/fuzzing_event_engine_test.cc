@@ -15,60 +15,20 @@
 #include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.h"
 
 #include <chrono>
-#include <thread>
 
-#include "absl/time/clock.h"
+#include <gtest/gtest.h>
 
-#include <grpc/grpc.h>
-
-#include "test/core/event_engine/fuzzing_event_engine/fuzzing_event_engine.pb.h"
-#include "test/core/event_engine/test_suite/event_engine_test.h"
-
-namespace grpc_event_engine {
-namespace experimental {
-namespace {
-
-class ThreadedFuzzingEventEngine : public FuzzingEventEngine {
- public:
-  ThreadedFuzzingEventEngine()
-      : FuzzingEventEngine(
-            []() {
-              Options options;
-              options.final_tick_length = std::chrono::milliseconds(10);
-              return options;
-            }(),
-            fuzzing_event_engine::Actions()),
-        main_([this]() {
-          while (!done_.load()) {
-            auto tick_start = absl::Now();
-            while (absl::Now() - tick_start < absl::Milliseconds(10)) {
-              absl::SleepFor(absl::Milliseconds(1));
-            }
-            Tick();
-          }
-        }) {}
-
-  ~ThreadedFuzzingEventEngine() override {
-    done_.store(true);
-    main_.join();
-  }
-
- private:
-  std::atomic<bool> done_{false};
-  std::thread main_;
-};
-
-}  // namespace
-}  // namespace experimental
-}  // namespace grpc_event_engine
+#include "test/core/event_engine/test_suite/event_engine_test_framework.h"
+#include "test/core/event_engine/test_suite/tests/timer_test.h"
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
-  SetEventEngineFactories(
-      []() {
-        return absl::make_unique<
-            grpc_event_engine::experimental::ThreadedFuzzingEventEngine>();
-      },
-      nullptr);
+  std::shared_ptr<grpc_event_engine::experimental::FuzzingEventEngine> engine =
+      std::make_shared<
+          grpc_event_engine::experimental::ThreadedFuzzingEventEngine>(
+          std::chrono::milliseconds(2));
+  SetEventEngineFactories([engine]() { return engine; },
+                          [engine]() { return engine; });
+  grpc_event_engine::experimental::InitTimerTests();
   return RUN_ALL_TESTS();
 }

@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/ext/transport/binder/wire_format/wire_writer.h"
+
+#include <grpc/support/port_platform.h>
 
 #ifndef GRPC_NO_BINDER
 
 #include <utility>
 
 #include "absl/cleanup/cleanup.h"
+#include "absl/log/check.h"
 #include "absl/types/variant.h"
 
 #include <grpc/support/log.h>
+
+#include "src/core/lib/event_engine/default_event_engine.h"
+#include "src/core/lib/gprpp/crash.h"
 
 #define RETURN_IF_ERROR(expr)           \
   do {                                  \
@@ -81,10 +85,9 @@ absl::Status WriteTrailingMetadata(const Transaction& tx,
 }
 
 WireWriterImpl::WireWriterImpl(std::unique_ptr<Binder> binder)
-    : binder_(std::move(binder)), combiner_(grpc_combiner_create()) {
-  gpr_log(GPR_INFO, "%s write_mu_ = %p , flow_control_mu_ = %p", __func__,
-          &write_mu_, &flow_control_mu_);
-}
+    : binder_(std::move(binder)),
+      combiner_(grpc_combiner_create(
+          grpc_event_engine::experimental::GetDefaultEventEngine())) {}
 
 WireWriterImpl::~WireWriterImpl() {
   GRPC_COMBINER_UNREF(combiner_, "wire_writer_impl");
@@ -120,7 +123,7 @@ absl::Status WireWriterImpl::MakeBinderTransaction(
     gpr_log(GPR_INFO, "Total outgoing bytes: %" PRId64,
             num_outgoing_bytes_.load());
   }
-  GPR_ASSERT(!is_transacting_);
+  CHECK(!is_transacting_);
   is_transacting_ = true;
   absl::Status result = binder_->Transact(tx_code);
   is_transacting_ = false;
@@ -129,7 +132,7 @@ absl::Status WireWriterImpl::MakeBinderTransaction(
 
 absl::Status WireWriterImpl::RpcCallFastPath(std::unique_ptr<Transaction> tx) {
   return MakeBinderTransaction(
-      BinderTransportTxCode(tx->GetTxCode()),
+      static_cast<BinderTransportTxCode>(tx->GetTxCode()),
       [this, tx = tx.get()](
           WritableParcel* parcel) ABSL_EXCLUSIVE_LOCKS_REQUIRED(write_mu_) {
         RETURN_IF_ERROR(parcel->WriteInt32(tx->GetFlags()));
@@ -153,10 +156,10 @@ absl::Status WireWriterImpl::RunStreamTx(
     bool* is_last_chunk) {
   Transaction* tx = stream_tx->tx.get();
   // Transaction without data flag should go to fast path.
-  GPR_ASSERT(tx->GetFlags() & kFlagMessageData);
+  CHECK(tx->GetFlags() & kFlagMessageData);
 
   absl::string_view data = tx->GetMessageData();
-  GPR_ASSERT(stream_tx->bytes_sent <= static_cast<int64_t>(data.size()));
+  CHECK(stream_tx->bytes_sent <= static_cast<int64_t>(data.size()));
 
   int flags = kFlagMessageData;
 
@@ -204,7 +207,7 @@ absl::Status WireWriterImpl::RunStreamTx(
 }
 
 void WireWriterImpl::RunScheduledTxInternal(RunScheduledTxArgs* args) {
-  GPR_ASSERT(args->writer == this);
+  CHECK(args->writer == this);
   if (absl::holds_alternative<RunScheduledTxArgs::AckTx>(args->tx)) {
     int64_t num_bytes =
         absl::get<RunScheduledTxArgs::AckTx>(args->tx).num_bytes;
@@ -221,7 +224,7 @@ void WireWriterImpl::RunScheduledTxInternal(RunScheduledTxArgs* args) {
     delete args;
     return;
   }
-  GPR_ASSERT(absl::holds_alternative<RunScheduledTxArgs::StreamTx>(args->tx));
+  CHECK(absl::holds_alternative<RunScheduledTxArgs::StreamTx>(args->tx));
   RunScheduledTxArgs::StreamTx* stream_tx =
       &absl::get<RunScheduledTxArgs::StreamTx>(args->tx);
   // Be reservative. Decrease CombinerTxCount after the data size of this
@@ -230,7 +233,7 @@ void WireWriterImpl::RunScheduledTxInternal(RunScheduledTxArgs* args) {
   auto decrease_combiner_tx_count = absl::MakeCleanup([this]() {
     {
       grpc_core::MutexLock lock(&flow_control_mu_);
-      GPR_ASSERT(num_non_acked_tx_in_combiner_ > 0);
+      CHECK_GT(num_non_acked_tx_in_combiner_, 0);
       num_non_acked_tx_in_combiner_--;
     }
     // New transaction might be ready to be scheduled.
@@ -247,7 +250,7 @@ void WireWriterImpl::RunScheduledTxInternal(RunScheduledTxArgs* args) {
   }
   bool is_last_chunk = true;
   absl::Status result = MakeBinderTransaction(
-      BinderTransportTxCode(stream_tx->tx->GetTxCode()),
+      static_cast<BinderTransportTxCode>(stream_tx->tx->GetTxCode()),
       [stream_tx, &is_last_chunk, this](WritableParcel* parcel)
           ABSL_EXCLUSIVE_LOCKS_REQUIRED(write_mu_) {
             return RunStreamTx(stream_tx, parcel, &is_last_chunk);
@@ -269,7 +272,7 @@ void WireWriterImpl::RunScheduledTxInternal(RunScheduledTxArgs* args) {
 
 absl::Status WireWriterImpl::RpcCall(std::unique_ptr<Transaction> tx) {
   // TODO(mingcl): check tx_code <= last call id
-  GPR_ASSERT(tx->GetTxCode() >= kFirstCallId);
+  CHECK(tx->GetTxCode() >= kFirstCallId);
   auto args = new RunScheduledTxArgs();
   args->writer = this;
   args->tx = RunScheduledTxArgs::StreamTx();
@@ -304,16 +307,16 @@ absl::Status WireWriterImpl::SendAck(int64_t num_bytes) {
     args->tx = RunScheduledTxArgs::AckTx();
     absl::get<RunScheduledTxArgs::AckTx>(args->tx).num_bytes = num_bytes;
     auto cl = GRPC_CLOSURE_CREATE(RunScheduledTx, args, nullptr);
-    combiner_->Run(cl, GRPC_ERROR_NONE);
+    combiner_->Run(cl, absl::OkStatus());
     return absl::OkStatus();
   }
   // Otherwise, we can directly send ack.
-  absl::Status result = MakeBinderTransaction(
-      BinderTransportTxCode(BinderTransportTxCode::ACKNOWLEDGE_BYTES),
-      [num_bytes](WritableParcel* parcel) {
-        RETURN_IF_ERROR(parcel->WriteInt64(num_bytes));
-        return absl::OkStatus();
-      });
+  absl::Status result =
+      MakeBinderTransaction((BinderTransportTxCode::ACKNOWLEDGE_BYTES),
+                            [num_bytes](WritableParcel* parcel) {
+                              RETURN_IF_ERROR(parcel->WriteInt64(num_bytes));
+                              return absl::OkStatus();
+                            });
   if (!result.ok()) {
     gpr_log(GPR_ERROR, "Failed to make binder transaction %s",
             result.ToString().c_str());
@@ -381,7 +384,7 @@ void WireWriterImpl::TryScheduleTransaction() {
       num_non_acked_tx_in_combiner_++;
       combiner_->Run(GRPC_CLOSURE_CREATE(RunScheduledTx,
                                          pending_outgoing_tx_.front(), nullptr),
-                     GRPC_ERROR_NONE);
+                     absl::OkStatus());
       pending_outgoing_tx_.pop();
     } else {
       // It is common to fill `kFlowControlWindowSize` completely because

@@ -26,11 +26,14 @@ grpc_cc_test(
         "gtest",
     ],
     language = "C++",
+    tags = [
+        "cpu:10",
+    ],
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

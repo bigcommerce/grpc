@@ -30,18 +30,20 @@
 #include <grpc/grpc_posix.h>
 #include <grpc/support/log.h>
 
+#include "src/core/lib/gprpp/crash.h"
+
 #ifdef GPR_SUPPORT_BINDER_TRANSPORT
 
-#include <grpc/support/port_platform.h>
-
+#include "absl/log/check.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/substitute.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 
+#include <grpc/support/port_platform.h>
 #include <grpcpp/impl/grpc_library.h>
 
-#include "src/core/ext/filters/client_channel/client_channel.h"
+#include "src/core/client_channel/client_channel_filter.h"
 #include "src/core/ext/transport/binder/client/channel_create_impl.h"
 #include "src/core/ext/transport/binder/client/connection_id_generator.h"
 #include "src/core/ext/transport/binder/client/endpoint_binder_pool.h"
@@ -66,44 +68,43 @@ namespace grpc {
 namespace experimental {
 
 std::shared_ptr<grpc::Channel> CreateBinderChannel(
-    void* jni_env_void, jobject application, absl::string_view package_name,
+    void* jni_env_void, jobject context, absl::string_view package_name,
     absl::string_view class_name,
     std::shared_ptr<grpc::experimental::binder::SecurityPolicy>
         security_policy) {
-  return CreateCustomBinderChannel(jni_env_void, application, package_name,
+  return CreateCustomBinderChannel(jni_env_void, context, package_name,
                                    class_name, security_policy,
                                    ChannelArguments());
 }
 
 std::shared_ptr<grpc::Channel> CreateCustomBinderChannel(
-    void* jni_env_void, jobject application, absl::string_view package_name,
+    void* jni_env_void, jobject context, absl::string_view package_name,
     absl::string_view class_name,
     std::shared_ptr<grpc::experimental::binder::SecurityPolicy> security_policy,
     const ChannelArguments& args) {
   return CreateCustomBinderChannel(
-      jni_env_void, application,
+      jni_env_void, context,
       absl::Substitute("android-app://$0#Intent;action=$1;component=$0/$2;end",
                        package_name, kStandardActionName, class_name),
       security_policy, args);
 }
 
 std::shared_ptr<grpc::Channel> CreateBinderChannel(
-    void* jni_env_void, jobject application, absl::string_view uri,
+    void* jni_env_void, jobject context, absl::string_view uri,
     std::shared_ptr<grpc::experimental::binder::SecurityPolicy>
         security_policy) {
-  return CreateCustomBinderChannel(jni_env_void, application, uri,
-                                   security_policy, ChannelArguments());
+  return CreateCustomBinderChannel(jni_env_void, context, uri, security_policy,
+                                   ChannelArguments());
 }
 
 std::shared_ptr<grpc::Channel> CreateCustomBinderChannel(
-    void* jni_env_void, jobject application, absl::string_view uri,
+    void* jni_env_void, jobject context, absl::string_view uri,
     std::shared_ptr<grpc::experimental::binder::SecurityPolicy> security_policy,
     const ChannelArguments& args) {
-  grpc::internal::GrpcLibrary init_lib;
-  init_lib.init();
+  grpc_init();
 
-  GPR_ASSERT(jni_env_void != nullptr);
-  GPR_ASSERT(security_policy != nullptr);
+  CHECK_NE(jni_env_void, nullptr);
+  CHECK_NE(security_policy, nullptr);
 
   // Generate an unique connection ID that identifies this connection (Useful
   // for mapping connection between Java and C++ code).
@@ -118,35 +119,23 @@ std::shared_ptr<grpc::Channel> CreateCustomBinderChannel(
   // until SubchannelConnector start establishing connection. For now we don't
   // see any benifits doing that.
   grpc_binder::TryEstablishConnectionWithUri(static_cast<JNIEnv*>(jni_env_void),
-                                             application, uri, connection_id);
+                                             context, uri, connection_id);
 
-  grpc_channel_args channel_args;
-  args.SetChannelArgs(&channel_args);
+  grpc_binder::GetSecurityPolicySetting()->Set(connection_id, security_policy);
 
   // Set server URI to a URI that contains connection id. The URI will be used
   // by subchannel connector to obtain correct endpoint binder from
   // `EndpointBinderPool`.
-  grpc_channel_args* new_args;
-  {
-    string server_uri = "binder:" + connection_id;
-    grpc_arg server_uri_arg =
-        grpc_channel_arg_string_create(const_cast<char*>(GRPC_ARG_SERVER_URI),
-                                       const_cast<char*>(server_uri.c_str()));
-    const char* to_remove[] = {GRPC_ARG_SERVER_URI};
-    new_args = grpc_channel_args_copy_and_add_and_remove(
-        &channel_args, to_remove, 1, &server_uri_arg, 1);
-  }
+  string server_uri = "binder:" + connection_id;
 
-  grpc_binder::GetSecurityPolicySetting()->Set(connection_id, security_policy);
+  grpc_channel_args channel_args;
+  args.SetChannelArgs(&channel_args);
 
-  auto channel = CreateChannelInternal(
-      "", grpc::internal::CreateClientBinderChannelImpl(new_args),
+  return CreateChannelInternal(
+      "",
+      grpc::internal::CreateClientBinderChannelImpl(server_uri, &channel_args),
       std::vector<
           std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>());
-
-  grpc_channel_args_destroy(new_args);
-
-  return channel;
 }
 
 bool InitializeBinderChannelJavaClass(void* jni_env_void) {
@@ -175,7 +164,7 @@ std::shared_ptr<grpc::Channel> CreateBinderChannel(
           "This APK is compiled with Android API level = %d, which is not "
           "supported. See port_platform.h for supported versions.",
           __ANDROID_API__);
-  GPR_ASSERT(0);
+  CHECK(0);
   return {};
 }
 
@@ -187,7 +176,7 @@ std::shared_ptr<grpc::Channel> CreateCustomBinderChannel(
           "This APK is compiled with Android API level = %d, which is not "
           "supported. See port_platform.h for supported versions.",
           __ANDROID_API__);
-  GPR_ASSERT(0);
+  CHECK(0);
   return {};
 }
 
@@ -198,7 +187,7 @@ std::shared_ptr<grpc::Channel> CreateBinderChannel(
           "This APK is compiled with Android API level = %d, which is not "
           "supported. See port_platform.h for supported versions.",
           __ANDROID_API__);
-  GPR_ASSERT(0);
+  CHECK(0);
   return {};
 }
 
@@ -210,7 +199,7 @@ std::shared_ptr<grpc::Channel> CreateCustomBinderChannel(
           "This APK is compiled with Android API level = %d, which is not "
           "supported. See port_platform.h for supported versions.",
           __ANDROID_API__);
-  GPR_ASSERT(0);
+  CHECK(0);
   return {};
 }
 
@@ -219,7 +208,7 @@ bool InitializeBinderChannelJavaClass(void* jni_env_void) {
           "This APK is compiled with Android API level = %d, which is not "
           "supported. See port_platform.h for supported versions.",
           __ANDROID_API__);
-  GPR_ASSERT(0);
+  CHECK(0);
   return {};
 }
 
@@ -229,7 +218,7 @@ bool InitializeBinderChannelJavaClass(
           "This APK is compiled with Android API level = %d, which is not "
           "supported. See port_platform.h for supported versions.",
           __ANDROID_API__);
-  GPR_ASSERT(0);
+  CHECK(0);
   return {};
 }
 

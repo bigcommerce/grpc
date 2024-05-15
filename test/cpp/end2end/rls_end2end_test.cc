@@ -28,10 +28,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "absl/log/check.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/types/optional.h"
 
+#include <grpc/credentials.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/create_channel.h>
 #include <grpcpp/security/credentials.h>
@@ -39,29 +41,33 @@
 #include <grpcpp/server_builder.h>
 #include <grpcpp/support/channel_arguments.h>
 
-#include "src/core/ext/filters/client_channel/backup_poller.h"
-#include "src/core/ext/filters/client_channel/resolver/fake/fake_resolver.h"
+#include "src/core/client_channel/backup_poller.h"
 #include "src/core/lib/address_utils/parse_address.h"
 #include "src/core/lib/channel/channel_args.h"
-#include "src/core/lib/gpr/env.h"
+#include "src/core/lib/config/config_vars.h"
+#include "src/core/lib/gprpp/env.h"
 #include "src/core/lib/gprpp/host_port.h"
 #include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/iomgr/sockaddr.h"
 #include "src/core/lib/security/credentials/fake/fake_credentials.h"
-#include "src/core/lib/service_config/service_config_impl.h"
 #include "src/core/lib/uri/uri_parser.h"
-#include "src/cpp/client/secure_credentials.h"
+#include "src/core/load_balancing/rls/rls.h"
+#include "src/core/resolver/fake/fake_resolver.h"
+#include "src/core/service_config/service_config_impl.h"
 #include "src/cpp/server/secure_server_credentials.h"
 #include "src/proto/grpc/lookup/v1/rls.grpc.pb.h"
 #include "src/proto/grpc/lookup/v1/rls.pb.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/resolve_localhost_ip46.h"
-#include "test/core/util/test_config.h"
-#include "test/core/util/test_lb_policies.h"
+#include "test/core/event_engine/event_engine_test_utils.h"
+#include "test/core/test_util/fake_stats_plugin.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/resolve_localhost_ip46.h"
+#include "test/core/test_util/test_config.h"
+#include "test/core/test_util/test_lb_policies.h"
 #include "test/cpp/end2end/counted_service.h"
 #include "test/cpp/end2end/rls_server.h"
 #include "test/cpp/end2end/test_service_impl.h"
+#include "test/cpp/util/credentials.h"
 #include "test/cpp/util/test_config.h"
 
 using ::grpc::lookup::v1::RouteLookupRequest;
@@ -72,6 +78,7 @@ namespace {
 
 const char* kServerName = "test.google.fr";
 const char* kRequestMessage = "Live long and prosper.";
+const char* kRlsInstanceUuid = "rls_instance_uuid";
 
 const char* kCallCredsMdKey = "call_cred_name";
 const char* kCallCredsMdValue = "call_cred_value";
@@ -100,7 +107,7 @@ class MyTestServiceImpl : public BackendService {
                     ::testing::Pair(kCallCredsMdKey, kCallCredsMdValue)));
     IncreaseRequestCount();
     auto client_metadata = context->client_metadata();
-    auto range = client_metadata.equal_range("X-Google-RLS-Data");
+    auto range = client_metadata.equal_range("x-google-rls-data");
     {
       grpc::internal::MutexLock lock(&mu_);
       for (auto it = range.first; it != range.second; ++it) {
@@ -134,7 +141,8 @@ class FakeResolverResponseGeneratorWrapper {
 
   void SetNextResolution(absl::string_view service_config_json) {
     grpc_core::ExecCtx exec_ctx;
-    response_generator_->SetResponse(BuildFakeResults(service_config_json));
+    response_generator_->SetResponseSynchronously(
+        BuildFakeResults(service_config_json));
   }
 
   grpc_core::FakeResolverResponseGenerator* Get() const {
@@ -145,13 +153,9 @@ class FakeResolverResponseGeneratorWrapper {
   static grpc_core::Resolver::Result BuildFakeResults(
       absl::string_view service_config_json) {
     grpc_core::Resolver::Result result;
-    grpc_error_handle error = GRPC_ERROR_NONE;
-    result.service_config = grpc_core::ServiceConfigImpl::Create(
-        result.args, service_config_json, &error);
-    EXPECT_EQ(error, GRPC_ERROR_NONE)
-        << "JSON: " << service_config_json
-        << "Error: " << grpc_error_std_string(error);
-    EXPECT_NE(*result.service_config, nullptr);
+    result.service_config =
+        grpc_core::ServiceConfigImpl::Create(result.args, service_config_json);
+    EXPECT_TRUE(result.service_config.ok()) << result.service_config.status();
     return result;
   }
 
@@ -162,57 +166,55 @@ class FakeResolverResponseGeneratorWrapper {
 class RlsEnd2endTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
-    gpr_setenv("GRPC_EXPERIMENTAL_ENABLE_RLS_LB_POLICY", "true");
-    GPR_GLOBAL_CONFIG_SET(grpc_client_channel_backup_poll_interval_ms, 1);
+    grpc_core::ConfigVars::Overrides overrides;
+    overrides.client_channel_backup_poll_interval_ms = 1;
+    grpc_core::ConfigVars::SetOverrides(overrides);
+    grpc_core::CoreConfiguration::RegisterBuilder(
+        grpc_core::RegisterFixedAddressLoadBalancingPolicy);
     grpc_init();
-    grpc_core::RegisterFixedAddressLoadBalancingPolicy();
   }
 
   static void TearDownTestSuite() {
     grpc_shutdown_blocking();
-    gpr_unsetenv("GRPC_EXPERIMENTAL_ENABLE_RLS_LB_POLICY");
+    WaitForSingleOwner(
+        grpc_event_engine::experimental::GetDefaultEventEngine());
+    grpc_core::CoreConfiguration::Reset();
   }
 
   void SetUp() override {
-    bool localhost_resolves_to_ipv4 = false;
-    bool localhost_resolves_to_ipv6 = false;
-    grpc_core::LocalhostResolves(&localhost_resolves_to_ipv4,
-                                 &localhost_resolves_to_ipv6);
-    ipv6_only_ = !localhost_resolves_to_ipv4 && localhost_resolves_to_ipv6;
-    rls_server_ = absl::make_unique<ServerThread<RlsServiceImpl>>(
+    rls_server_ = std::make_unique<ServerThread<RlsServiceImpl>>(
         "rls", [](grpc::ServerContext* ctx) {
           EXPECT_THAT(ctx->client_metadata(),
                       ::testing::Contains(
                           ::testing::Pair(kCallCredsMdKey, kCallCredsMdValue)));
+          EXPECT_EQ(ctx->ExperimentalGetAuthority(), kServerName);
         });
     rls_server_->Start();
+    rls_server_target_ = absl::StrFormat("localhost:%d", rls_server_->port_);
+    // Set up client.
     resolver_response_generator_ =
-        absl::make_unique<FakeResolverResponseGeneratorWrapper>();
-    ResetStub();
+        std::make_unique<FakeResolverResponseGeneratorWrapper>();
+    ChannelArguments args;
+    args.SetPointer(GRPC_ARG_FAKE_RESOLVER_RESPONSE_GENERATOR,
+                    resolver_response_generator_->Get());
+    args.SetString(GRPC_ARG_FAKE_SECURITY_EXPECTED_TARGETS, kServerName);
+    args.SetString(GRPC_ARG_TEST_ONLY_RLS_INSTANCE_ID, kRlsInstanceUuid);
+    grpc_channel_credentials* channel_creds =
+        grpc_fake_transport_security_credentials_create();
+    grpc_call_credentials* call_creds = grpc_md_only_test_credentials_create(
+        kCallCredsMdKey, kCallCredsMdValue);
+    auto creds = std::make_shared<TestCompositeChannelCredentials>(
+        channel_creds, call_creds);
+    call_creds->Unref();
+    channel_creds->Unref();
+    target_uri_ = absl::StrCat("fake:///", kServerName);
+    channel_ = grpc::CreateCustomChannel(target_uri_, creds, args);
+    stub_ = grpc::testing::EchoTestService::NewStub(channel_);
   }
 
   void TearDown() override {
     ShutdownBackends();
     rls_server_->Shutdown();
-  }
-
-  void ResetStub(const char* expected_authority = kServerName) {
-    ChannelArguments args;
-    args.SetPointer(GRPC_ARG_FAKE_RESOLVER_RESPONSE_GENERATOR,
-                    resolver_response_generator_->Get());
-    args.SetString(GRPC_ARG_FAKE_SECURITY_EXPECTED_TARGETS, expected_authority);
-    grpc_channel_credentials* channel_creds =
-        grpc_fake_transport_security_credentials_create();
-    grpc_call_credentials* call_creds = grpc_md_only_test_credentials_create(
-        kCallCredsMdKey, kCallCredsMdValue);
-    auto creds = std::make_shared<SecureChannelCredentials>(
-        grpc_composite_channel_credentials_create(channel_creds, call_creds,
-                                                  nullptr));
-    call_creds->Unref();
-    channel_creds->Unref();
-    channel_ = grpc::CreateCustomChannel(
-        absl::StrCat("fake:///", kServerName).c_str(), std::move(creds), args);
-    stub_ = grpc::testing::EchoTestService::NewStub(channel_);
   }
 
   void ShutdownBackends() {
@@ -225,18 +227,13 @@ class RlsEnd2endTest : public ::testing::Test {
     backends_.clear();
     for (size_t i = 0; i < num_servers; ++i) {
       backends_.push_back(
-          absl::make_unique<ServerThread<MyTestServiceImpl>>("backend"));
+          std::make_unique<ServerThread<MyTestServiceImpl>>("backend"));
       backends_.back()->Start();
     }
   }
 
-  std::string TargetStringForPort(int port) {
-    if (ipv6_only_) return absl::StrCat("ipv6:[::1]:", port);
-    return absl::StrCat("ipv4:127.0.0.1:", port);
-  }
-
   struct RpcOptions {
-    int timeout_ms = 1000;
+    int timeout_ms = 2000;
     bool wait_for_ready = false;
     std::vector<std::pair<std::string, std::string>> metadata;
 
@@ -307,8 +304,8 @@ class RlsEnd2endTest : public ::testing::Test {
 
   class ServiceConfigBuilder {
    public:
-    explicit ServiceConfigBuilder(int rls_server_port)
-        : rls_server_port_(rls_server_port) {}
+    explicit ServiceConfigBuilder(absl::string_view rls_server_target)
+        : rls_server_target_(rls_server_target) {}
 
     ServiceConfigBuilder& set_lookup_service_timeout(
         grpc_core::Duration timeout) {
@@ -345,7 +342,7 @@ class RlsEnd2endTest : public ::testing::Test {
       // First build parts of routeLookupConfig.
       std::vector<std::string> route_lookup_config_parts;
       route_lookup_config_parts.push_back(absl::StrFormat(
-          "        \"lookupService\":\"localhost:%d\"", rls_server_port_));
+          "        \"lookupService\":\"%s\"", rls_server_target_));
       if (lookup_service_timeout_ > grpc_core::Duration::Zero()) {
         route_lookup_config_parts.push_back(
             absl::StrFormat("        \"lookupServiceTimeout\":\"%fs\"",
@@ -394,7 +391,7 @@ class RlsEnd2endTest : public ::testing::Test {
     }
 
    private:
-    int rls_server_port_;
+    absl::string_view rls_server_target_;
     grpc_core::Duration lookup_service_timeout_;
     std::string default_target_;
     grpc_core::Duration max_age_;
@@ -404,7 +401,7 @@ class RlsEnd2endTest : public ::testing::Test {
   };
 
   ServiceConfigBuilder MakeServiceConfigBuilder() {
-    return ServiceConfigBuilder(rls_server_->port_);
+    return ServiceConfigBuilder(rls_server_target_);
   }
 
   void SetNextResolution(absl::string_view service_config_json) {
@@ -421,7 +418,7 @@ class RlsEnd2endTest : public ::testing::Test {
 
     void Start() {
       gpr_log(GPR_INFO, "starting %s server on port %d", type_.c_str(), port_);
-      GPR_ASSERT(!running_);
+      CHECK(!running_);
       running_ = true;
       service_.Start();
       grpc::internal::Mutex mu;
@@ -429,7 +426,7 @@ class RlsEnd2endTest : public ::testing::Test {
       // by ServerThread::Serve from firing before the wait below is hit.
       grpc::internal::MutexLock lock(&mu);
       grpc::internal::CondVar cond;
-      thread_ = absl::make_unique<std::thread>(
+      thread_ = std::make_unique<std::thread>(
           std::bind(&ServerThread::Serve, this, &mu, &cond));
       cond.Wait(&mu);
       gpr_log(GPR_INFO, "%s server startup complete", type_.c_str());
@@ -467,11 +464,12 @@ class RlsEnd2endTest : public ::testing::Test {
     bool running_ = false;
   };
 
-  bool ipv6_only_;
   std::vector<std::unique_ptr<ServerThread<MyTestServiceImpl>>> backends_;
+  std::string rls_server_target_;
   std::unique_ptr<ServerThread<RlsServiceImpl>> rls_server_;
   std::unique_ptr<FakeResolverResponseGeneratorWrapper>
       resolver_response_generator_;
+  std::string target_uri_;
   std::shared_ptr<grpc::Channel> channel_;
   std::unique_ptr<grpc::testing::EchoTestService::Stub> stub_;
 };
@@ -496,7 +494,7 @@ TEST_F(RlsEnd2endTest, Basic) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -527,7 +525,7 @@ TEST_F(RlsEnd2endTest, DuplicateHeadersAreMerged) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, absl::StrCat(kTestValue, ",", kTestValue2)}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   // Same header present twice in the request.  Values should be merged.
   CheckRpcSendOk(
       DEBUG_LOCATION,
@@ -557,7 +555,7 @@ TEST_F(RlsEnd2endTest, SecondHeaderUsed) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key2", kTestValue}}));
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -596,7 +594,7 @@ TEST_F(RlsEnd2endTest, MultipleHeaderKeys) {
           {kTestKey, kTestValue},
           {kTestKey2, kTestValue2},
       }),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(
       DEBUG_LOCATION,
       RpcOptions().set_metadata({{"key1", kTestValue}, {"key2", kTestValue2}}));
@@ -627,7 +625,7 @@ TEST_F(RlsEnd2endTest, NoHeaderMatch) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   // Request does not have header "key1", so kTestKey will not be added.
   CheckRpcSendOk(DEBUG_LOCATION);
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -653,7 +651,7 @@ TEST_F(RlsEnd2endTest, WildcardMethod) {
                         .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -681,7 +679,7 @@ TEST_F(RlsEnd2endTest, NoKeyBuilderForMethod) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION);
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
   EXPECT_EQ(rls_server_->service_.response_count(), 1);
@@ -709,7 +707,7 @@ TEST_F(RlsEnd2endTest, HeaderData) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)},
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)},
                        kHeaderData));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
@@ -756,7 +754,7 @@ TEST_F(RlsEnd2endTest, ExtraKeysAndConstantKeys) {
           {kMethodKey, kMethodValue},
           {kConstantKey, kConstantValue},
       }),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -785,10 +783,10 @@ TEST_F(RlsEnd2endTest, TwoCacheEntriesWithSameTarget) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue2}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -832,10 +830,10 @@ TEST_F(RlsEnd2endTest, FailedRlsRequestWithoutDefaultTarget) {
   const char* kTestValue3 = "test_value_3";
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue2}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue3}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue2}}));
   CheckRpcSendOk(DEBUG_LOCATION,
@@ -857,7 +855,7 @@ TEST_F(RlsEnd2endTest, FailedRlsRequestWithoutDefaultTarget) {
   // Now give the RLS server the right response.
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   // Sleep long enough for backoff to elapse, then try another RPC.
   gpr_sleep_until(grpc_timeout_seconds_to_deadline(3));
   CheckRpcSendOk(DEBUG_LOCATION,
@@ -884,7 +882,7 @@ TEST_F(RlsEnd2endTest, FailedRlsRequestWithDefaultTarget) {
                                          "  }"
                                          "]",
                                          kServiceValue, kMethodValue, kTestKey))
-          .set_default_target(TargetStringForPort(backends_[0]->port_))
+          .set_default_target(grpc_core::LocalIpUri(backends_[0]->port_))
           .Build());
   // Don't give the RLS server a response, so the RLS request will fail.
   // The data plane RPC should be sent to the default target.
@@ -920,13 +918,13 @@ TEST_F(RlsEnd2endTest, RlsRequestTimeout) {
                                          "  }"
                                          "]",
                                          kServiceValue, kMethodValue, kTestKey))
-          .set_default_target(TargetStringForPort(backends_[1]->port_))
+          .set_default_target(grpc_core::LocalIpUri(backends_[1]->port_))
           .set_lookup_service_timeout(grpc_core::Duration::Seconds(2))
           .Build());
   // RLS server will send a response, but it's longer than the timeout.
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}),
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}),
       /*response_delay=*/grpc_core::Duration::Seconds(3));
   // The data plane RPC should be sent to the default target.
   CheckRpcSendOk(DEBUG_LOCATION, RpcOptions().set_timeout_ms(4000).set_metadata(
@@ -953,7 +951,7 @@ TEST_F(RlsEnd2endTest, UpdateConfig) {
                                          "  }"
                                          "]",
                                          kServiceValue, kMethodValue, kTestKey))
-          .set_default_target(TargetStringForPort(backends_[0]->port_));
+          .set_default_target(grpc_core::LocalIpUri(backends_[0]->port_));
   SetNextResolution(service_config_builder.Build());
   // Don't give the RLS server a response, so the RLS request will fail.
   // The data plane RPC should be sent to the default target.
@@ -973,7 +971,7 @@ TEST_F(RlsEnd2endTest, UpdateConfig) {
   EXPECT_EQ(backends_[1]->service_.request_count(), 0);
   // Now update the config to point to a new default target.
   service_config_builder.set_default_target(
-      TargetStringForPort(backends_[1]->port_));
+      grpc_core::LocalIpUri(backends_[1]->port_));
   SetNextResolution(service_config_builder.Build());
   // Send another RPC, which should go to the new default target.
   // The RLS server will *not* see another request, because the cache
@@ -1006,7 +1004,7 @@ TEST_F(RlsEnd2endTest, CachedResponse) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   // Send two RPCs.
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
@@ -1040,7 +1038,7 @@ TEST_F(RlsEnd2endTest, StaleCacheEntry) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   // Send one RPC.  RLS server gets a request, and RPC goes to backend.
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
@@ -1053,7 +1051,7 @@ TEST_F(RlsEnd2endTest, StaleCacheEntry) {
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}},
                       RouteLookupRequest::REASON_STALE),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   // Wait longer than stale age.
   gpr_sleep_until(grpc_timeout_seconds_to_deadline(2));
   // Send another RPC.  This should use the stale value but should
@@ -1090,7 +1088,7 @@ TEST_F(RlsEnd2endTest, StaleCacheEntryWithHeaderData) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)},
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)},
                        kHeaderData));
   // Send one RPC.  RLS server gets a request, and RPC goes to backend.
   CheckRpcSendOk(DEBUG_LOCATION,
@@ -1104,7 +1102,7 @@ TEST_F(RlsEnd2endTest, StaleCacheEntryWithHeaderData) {
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}},
                       RouteLookupRequest::REASON_STALE, kHeaderData),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)},
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)},
                        kHeaderData));
   // Wait longer than stale age.
   gpr_sleep_until(grpc_timeout_seconds_to_deadline(2));
@@ -1141,7 +1139,7 @@ TEST_F(RlsEnd2endTest, ExpiredCacheEntry) {
           .Build());
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   // Send one RPC.  RLS server gets a request, and RPC goes to backend.
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
@@ -1187,10 +1185,10 @@ TEST_F(RlsEnd2endTest, CacheSizeLimit) {
   // Set RLS responses for both kTestValue and kTestValue2.
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue}}),
-      BuildRlsResponse({TargetStringForPort(backends_[0]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[0]->port_)}));
   rls_server_->service_.SetResponse(
       BuildRlsRequest({{kTestKey, kTestValue2}}),
-      BuildRlsResponse({TargetStringForPort(backends_[1]->port_)}));
+      BuildRlsResponse({grpc_core::LocalIpUri(backends_[1]->port_)}));
   // Send an RPC for kTestValue.
   // RLS server gets a request, and RPC goes to backend.
   CheckRpcSendOk(DEBUG_LOCATION,
@@ -1258,7 +1256,7 @@ TEST_F(RlsEnd2endTest, MultipleTargets) {
       BuildRlsResponse(
           // Second target will report TRANSIENT_FAILURE, but should
           // never be used.
-          {TargetStringForPort(backends_[0]->port_), "invalid_target"}));
+          {grpc_core::LocalIpUri(backends_[0]->port_), "invalid_target"}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -1288,7 +1286,7 @@ TEST_F(RlsEnd2endTest, MultipleTargetsFirstInTransientFailure) {
       BuildRlsRequest({{kTestKey, kTestValue}}),
       BuildRlsResponse(
           // First target will report TRANSIENT_FAILURE.
-          {"invalid_target", TargetStringForPort(backends_[0]->port_)}));
+          {"invalid_target", grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -1319,7 +1317,7 @@ TEST_F(RlsEnd2endTest, ConnectivityStateReady) {
       BuildRlsRequest({{kTestKey, kTestValue}}),
       BuildRlsResponse(
           // One target in TRANSIENT_FAILURE, the other in READY.
-          {"invalid_target", TargetStringForPort(backends_[0]->port_)}));
+          {"invalid_target", grpc_core::LocalIpUri(backends_[0]->port_)}));
   CheckRpcSendOk(DEBUG_LOCATION,
                  RpcOptions().set_metadata({{"key1", kTestValue}}));
   EXPECT_EQ(rls_server_->service_.request_count(), 1);
@@ -1383,9 +1381,131 @@ TEST_F(RlsEnd2endTest, ConnectivityStateTransientFailure) {
             channel_->GetState(/*try_to_connect=*/false));
 }
 
-TEST_F(RlsEnd2endTest, RlsAuthorityDeathTest) {
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-  ResetStub("incorrect_authority");
+class RlsMetricsEnd2endTest : public RlsEnd2endTest {
+ protected:
+  void SetUp() override {
+    // Register stats plugin before initializing client.
+    stats_plugin_ = grpc_core::FakeStatsPluginBuilder()
+                        .UseDisabledByDefaultMetrics(true)
+                        .BuildAndRegister();
+    RlsEnd2endTest::SetUp();
+  }
+
+  std::shared_ptr<grpc_core::FakeStatsPlugin> stats_plugin_;
+};
+
+TEST_F(RlsMetricsEnd2endTest, MetricDefinitionDefaultTargetPicks) {
+  const auto* descriptor =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::FindMetricDescriptorByName(
+          "grpc.lb.rls.default_target_picks");
+  ASSERT_NE(descriptor, nullptr);
+  EXPECT_EQ(descriptor->value_type,
+            grpc_core::GlobalInstrumentsRegistry::ValueType::kUInt64);
+  EXPECT_EQ(descriptor->instrument_type,
+            grpc_core::GlobalInstrumentsRegistry::InstrumentType::kCounter);
+  EXPECT_EQ(descriptor->enable_by_default, false);
+  EXPECT_EQ(descriptor->name, "grpc.lb.rls.default_target_picks");
+  EXPECT_EQ(descriptor->unit, "{pick}");
+  EXPECT_THAT(descriptor->label_keys,
+              ::testing::ElementsAre("grpc.target", "grpc.lb.rls.server_target",
+                                     "grpc.lb.rls.data_plane_target",
+                                     "grpc.lb.pick_result"));
+  EXPECT_THAT(descriptor->optional_label_keys, ::testing::ElementsAre());
+}
+
+TEST_F(RlsMetricsEnd2endTest, MetricDefinitionTargetPicks) {
+  const auto* descriptor =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::FindMetricDescriptorByName(
+          "grpc.lb.rls.target_picks");
+  ASSERT_NE(descriptor, nullptr);
+  EXPECT_EQ(descriptor->value_type,
+            grpc_core::GlobalInstrumentsRegistry::ValueType::kUInt64);
+  EXPECT_EQ(descriptor->instrument_type,
+            grpc_core::GlobalInstrumentsRegistry::InstrumentType::kCounter);
+  EXPECT_EQ(descriptor->enable_by_default, false);
+  EXPECT_EQ(descriptor->name, "grpc.lb.rls.target_picks");
+  EXPECT_EQ(descriptor->unit, "{pick}");
+  EXPECT_THAT(descriptor->label_keys,
+              ::testing::ElementsAre("grpc.target", "grpc.lb.rls.server_target",
+                                     "grpc.lb.rls.data_plane_target",
+                                     "grpc.lb.pick_result"));
+  EXPECT_THAT(descriptor->optional_label_keys, ::testing::ElementsAre());
+}
+
+TEST_F(RlsMetricsEnd2endTest, MetricDefinitionFailedPicks) {
+  const auto* descriptor =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::FindMetricDescriptorByName(
+          "grpc.lb.rls.failed_picks");
+  ASSERT_NE(descriptor, nullptr);
+  EXPECT_EQ(descriptor->value_type,
+            grpc_core::GlobalInstrumentsRegistry::ValueType::kUInt64);
+  EXPECT_EQ(descriptor->instrument_type,
+            grpc_core::GlobalInstrumentsRegistry::InstrumentType::kCounter);
+  EXPECT_EQ(descriptor->enable_by_default, false);
+  EXPECT_EQ(descriptor->name, "grpc.lb.rls.failed_picks");
+  EXPECT_EQ(descriptor->unit, "{pick}");
+  EXPECT_THAT(
+      descriptor->label_keys,
+      ::testing::ElementsAre("grpc.target", "grpc.lb.rls.server_target"));
+  EXPECT_THAT(descriptor->optional_label_keys, ::testing::ElementsAre());
+}
+
+TEST_F(RlsMetricsEnd2endTest, MetricDefinitionCacheEntries) {
+  const auto* descriptor =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::FindMetricDescriptorByName(
+          "grpc.lb.rls.cache_entries");
+  ASSERT_NE(descriptor, nullptr);
+  EXPECT_EQ(descriptor->value_type,
+            grpc_core::GlobalInstrumentsRegistry::ValueType::kInt64);
+  EXPECT_EQ(
+      descriptor->instrument_type,
+      grpc_core::GlobalInstrumentsRegistry::InstrumentType::kCallbackGauge);
+  EXPECT_EQ(descriptor->enable_by_default, false);
+  EXPECT_EQ(descriptor->name, "grpc.lb.rls.cache_entries");
+  EXPECT_EQ(descriptor->unit, "{entry}");
+  EXPECT_THAT(descriptor->label_keys,
+              ::testing::ElementsAre("grpc.target", "grpc.lb.rls.server_target",
+                                     "grpc.lb.rls.instance_uuid"));
+  EXPECT_THAT(descriptor->optional_label_keys, ::testing::ElementsAre());
+}
+
+TEST_F(RlsMetricsEnd2endTest, MetricDefinitionCacheSize) {
+  const auto* descriptor =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::FindMetricDescriptorByName(
+          "grpc.lb.rls.cache_size");
+  ASSERT_NE(descriptor, nullptr);
+  EXPECT_EQ(descriptor->value_type,
+            grpc_core::GlobalInstrumentsRegistry::ValueType::kInt64);
+  EXPECT_EQ(
+      descriptor->instrument_type,
+      grpc_core::GlobalInstrumentsRegistry::InstrumentType::kCallbackGauge);
+  EXPECT_EQ(descriptor->enable_by_default, false);
+  EXPECT_EQ(descriptor->name, "grpc.lb.rls.cache_size");
+  EXPECT_EQ(descriptor->unit, "By");
+  EXPECT_THAT(descriptor->label_keys,
+              ::testing::ElementsAre("grpc.target", "grpc.lb.rls.server_target",
+                                     "grpc.lb.rls.instance_uuid"));
+  EXPECT_THAT(descriptor->optional_label_keys, ::testing::ElementsAre());
+}
+
+TEST_F(RlsMetricsEnd2endTest, MetricValues) {
+  auto kMetricTargetPicks =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::
+          FindUInt64CounterHandleByName("grpc.lb.rls.target_picks")
+              .value();
+  auto kMetricFailedPicks =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::
+          FindUInt64CounterHandleByName("grpc.lb.rls.failed_picks")
+              .value();
+  auto kMetricCacheEntries =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::
+          FindCallbackInt64GaugeHandleByName("grpc.lb.rls.cache_entries")
+              .value();
+  auto kMetricCacheSize =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::
+          FindCallbackInt64GaugeHandleByName("grpc.lb.rls.cache_size")
+              .value();
+  StartBackends(2);
   SetNextResolution(
       MakeServiceConfigBuilder()
           .AddKeyBuilder(absl::StrFormat("\"names\":[{"
@@ -1402,14 +1522,166 @@ TEST_F(RlsEnd2endTest, RlsAuthorityDeathTest) {
                                          "]",
                                          kServiceValue, kMethodValue, kTestKey))
           .Build());
-  // Make sure that we blow up (via abort() from the security connector) when
-  // the authority for the RLS channel doesn't match expectations.
-  ASSERT_DEATH_IF_SUPPORTED(
-      {
-        CheckRpcSendOk(DEBUG_LOCATION,
-                       RpcOptions().set_metadata({{"key1", kTestValue}}));
-      },
-      "");
+  const std::string rls_target0 = grpc_core::LocalIpUri(backends_[0]->port_);
+  const std::string rls_target1 = grpc_core::LocalIpUri(backends_[1]->port_);
+  // Send an RPC to the target for backend 0.
+  rls_server_->service_.SetResponse(BuildRlsRequest({{kTestKey, rls_target0}}),
+                                    BuildRlsResponse({rls_target0}));
+  CheckRpcSendOk(DEBUG_LOCATION,
+                 RpcOptions().set_metadata({{"key1", rls_target0}}));
+  EXPECT_EQ(rls_server_->service_.request_count(), 1);
+  EXPECT_EQ(rls_server_->service_.response_count(), 1);
+  EXPECT_EQ(backends_[0]->service_.request_count(), 1);
+  EXPECT_EQ(backends_[1]->service_.request_count(), 0);
+  // Check exported metrics.
+  EXPECT_THAT(
+      stats_plugin_->GetUInt64CounterValue(
+          kMetricTargetPicks,
+          {target_uri_, rls_server_target_, rls_target0, "complete"}, {}),
+      ::testing::Optional(1));
+  EXPECT_THAT(
+      stats_plugin_->GetUInt64CounterValue(
+          kMetricTargetPicks,
+          {target_uri_, rls_server_target_, rls_target1, "complete"}, {}),
+      absl::nullopt);
+  EXPECT_EQ(stats_plugin_->GetUInt64CounterValue(
+                kMetricFailedPicks, {target_uri_, rls_server_target_}, {}),
+            absl::nullopt);
+  stats_plugin_->TriggerCallbacks();
+  EXPECT_THAT(stats_plugin_->GetInt64CallbackGaugeValue(
+                  kMetricCacheEntries,
+                  {target_uri_, rls_server_target_, kRlsInstanceUuid}, {}),
+              ::testing::Optional(1));
+  auto cache_size = stats_plugin_->GetInt64CallbackGaugeValue(
+      kMetricCacheSize, {target_uri_, rls_server_target_, kRlsInstanceUuid},
+      {});
+  EXPECT_THAT(cache_size, ::testing::Optional(::testing::Ge(1)));
+  // Send an RPC to the target for backend 1.
+  rls_server_->service_.SetResponse(BuildRlsRequest({{kTestKey, rls_target1}}),
+                                    BuildRlsResponse({rls_target1}));
+  CheckRpcSendOk(DEBUG_LOCATION,
+                 RpcOptions().set_metadata({{"key1", rls_target1}}));
+  EXPECT_EQ(rls_server_->service_.request_count(), 2);
+  EXPECT_EQ(rls_server_->service_.response_count(), 2);
+  EXPECT_EQ(backends_[0]->service_.request_count(), 1);
+  EXPECT_EQ(backends_[1]->service_.request_count(), 1);
+  // Check exported metrics.
+  EXPECT_THAT(
+      stats_plugin_->GetUInt64CounterValue(
+          kMetricTargetPicks,
+          {target_uri_, rls_server_target_, rls_target0, "complete"}, {}),
+      ::testing::Optional(1));
+  EXPECT_THAT(
+      stats_plugin_->GetUInt64CounterValue(
+          kMetricTargetPicks,
+          {target_uri_, rls_server_target_, rls_target1, "complete"}, {}),
+      ::testing::Optional(1));
+  EXPECT_EQ(stats_plugin_->GetUInt64CounterValue(
+                kMetricFailedPicks, {target_uri_, rls_server_target_}, {}),
+            absl::nullopt);
+  stats_plugin_->TriggerCallbacks();
+  EXPECT_THAT(stats_plugin_->GetInt64CallbackGaugeValue(
+                  kMetricCacheEntries,
+                  {target_uri_, rls_server_target_, kRlsInstanceUuid}, {}),
+              ::testing::Optional(2));
+  auto cache_size2 = stats_plugin_->GetInt64CallbackGaugeValue(
+      kMetricCacheSize, {target_uri_, rls_server_target_, kRlsInstanceUuid},
+      {});
+  EXPECT_THAT(cache_size2, ::testing::Optional(::testing::Ge(2)));
+  if (cache_size.has_value() && cache_size2.has_value()) {
+    EXPECT_GT(*cache_size2, *cache_size);
+  }
+  // Send an RPC for which the RLS server has no response, which means
+  // that the RLS request will fail.  There is no default target, so the
+  // data plane RPC will fail.
+  CheckRpcSendFailure(DEBUG_LOCATION, StatusCode::UNAVAILABLE,
+                      "RLS request failed: INTERNAL: no response entry",
+                      RpcOptions().set_metadata({{"key1", kTestValue}}));
+  EXPECT_THAT(
+      rls_server_->service_.GetUnmatchedRequests(),
+      ::testing::ElementsAre(
+          // TODO(roth): Change this to use ::testing::ProtoEquals()
+          // once that becomes available in OSS.
+          ::testing::Property(
+              &RouteLookupRequest::DebugString,
+              BuildRlsRequest({{kTestKey, kTestValue}}).DebugString())));
+  EXPECT_EQ(rls_server_->service_.request_count(), 3);
+  EXPECT_EQ(rls_server_->service_.response_count(), 2);
+  EXPECT_EQ(backends_[0]->service_.request_count(), 1);
+  EXPECT_EQ(backends_[1]->service_.request_count(), 1);
+  // Check exported metrics.
+  EXPECT_THAT(
+      stats_plugin_->GetUInt64CounterValue(
+          kMetricTargetPicks,
+          {target_uri_, rls_server_target_, rls_target0, "complete"}, {}),
+      ::testing::Optional(1));
+  EXPECT_THAT(
+      stats_plugin_->GetUInt64CounterValue(
+          kMetricTargetPicks,
+          {target_uri_, rls_server_target_, rls_target1, "complete"}, {}),
+      ::testing::Optional(1));
+  EXPECT_THAT(stats_plugin_->GetUInt64CounterValue(
+                  kMetricFailedPicks, {target_uri_, rls_server_target_}, {}),
+              ::testing::Optional(1));
+  stats_plugin_->TriggerCallbacks();
+  EXPECT_THAT(stats_plugin_->GetInt64CallbackGaugeValue(
+                  kMetricCacheEntries,
+                  {target_uri_, rls_server_target_, kRlsInstanceUuid}, {}),
+              ::testing::Optional(3));
+  auto cache_size3 = stats_plugin_->GetInt64CallbackGaugeValue(
+      kMetricCacheSize, {target_uri_, rls_server_target_, kRlsInstanceUuid},
+      {});
+  EXPECT_THAT(cache_size3, ::testing::Optional(::testing::Ge(3)));
+  if (cache_size.has_value() && cache_size3.has_value()) {
+    EXPECT_GT(*cache_size3, *cache_size);
+  }
+}
+
+TEST_F(RlsMetricsEnd2endTest, MetricValuesDefaultTargetRpcs) {
+  auto kMetricDefaultTargetPicks =
+      grpc_core::GlobalInstrumentsRegistryTestPeer::
+          FindUInt64CounterHandleByName("grpc.lb.rls.default_target_picks")
+              .value();
+  StartBackends(1);
+  const std::string default_target = grpc_core::LocalIpUri(backends_[0]->port_);
+  SetNextResolution(
+      MakeServiceConfigBuilder()
+          .AddKeyBuilder(absl::StrFormat("\"names\":[{"
+                                         "  \"service\":\"%s\","
+                                         "  \"method\":\"%s\""
+                                         "}],"
+                                         "\"headers\":["
+                                         "  {"
+                                         "    \"key\":\"%s\","
+                                         "    \"names\":["
+                                         "      \"key1\""
+                                         "    ]"
+                                         "  }"
+                                         "]",
+                                         kServiceValue, kMethodValue, kTestKey))
+          .set_default_target(default_target)
+          .Build());
+  // Don't give the RLS server a response, so the RLS request will fail.
+  // The data plane RPC should be sent to the default target.
+  CheckRpcSendOk(DEBUG_LOCATION,
+                 RpcOptions().set_metadata({{"key1", kTestValue}}));
+  EXPECT_THAT(
+      rls_server_->service_.GetUnmatchedRequests(),
+      ::testing::ElementsAre(
+          // TODO(roth): Change this to use ::testing::ProtoEquals()
+          // once that becomes available in OSS.
+          ::testing::Property(
+              &RouteLookupRequest::DebugString,
+              BuildRlsRequest({{kTestKey, kTestValue}}).DebugString())));
+  EXPECT_EQ(rls_server_->service_.request_count(), 1);
+  EXPECT_EQ(rls_server_->service_.response_count(), 0);
+  EXPECT_EQ(backends_[0]->service_.request_count(), 1);
+  // Check expected metrics.
+  EXPECT_THAT(
+      stats_plugin_->GetUInt64CounterValue(
+          kMetricDefaultTargetPicks,
+          {target_uri_, rls_server_target_, default_target, "complete"}, {}),
+      ::testing::Optional(1));
 }
 
 }  // namespace

@@ -1,25 +1,27 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <memory>
 #include <thread>
 
 #include <gtest/gtest.h>
+
+#include "absl/log/check.h"
 
 #include <grpc/grpc.h>
 #include <grpcpp/channel.h>
@@ -30,12 +32,12 @@
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
 
-#include "src/core/lib/gpr/env.h"
+#include "src/core/lib/gprpp/env.h"
 #include "src/core/lib/iomgr/iomgr.h"
 #include "src/proto/grpc/testing/duplicate/echo_duplicate.grpc.pb.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/end2end/test_service_impl.h"
 #include "test/cpp/util/byte_buffer_proto_helper.h"
 
@@ -212,7 +214,7 @@ void HandleGenericCall(AsyncGenericService* service,
     HandleGenericRequestStream(&stream, cq);
   } else {  // other methods not handled yet.
     gpr_log(GPR_ERROR, "method: %s", srv_ctx.method().c_str());
-    GPR_ASSERT(0);
+    CHECK(0);
   }
 }
 
@@ -230,10 +232,10 @@ class HybridEnd2endTest : public ::testing::TestWithParam<bool> {
  protected:
   HybridEnd2endTest() {}
 
-  static void SetUpTestCase() {
+  static void SetUpTestSuite() {
 #if TARGET_OS_IPHONE
     // Workaround Apple CFStream bug
-    gpr_setenv("grpc_cfstream", "0");
+    grpc_core::SetEnv("grpc_cfstream", "0");
 #endif
   }
 
@@ -540,7 +542,7 @@ TEST_F(HybridEnd2endTest, AsyncRequestStreamResponseStream) {
 }
 
 // Add a second service with one sync method.
-TEST_F(HybridEnd2endTest, AsyncRequestStreamResponseStream_SyncDupService) {
+TEST_F(HybridEnd2endTest, AsyncRequestStreamResponseStreamSyncDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithAsyncMethod_ResponseStream<TestServiceImpl>>
       SType;
@@ -571,15 +573,15 @@ class StreamedUnaryDupPkg
     uint32_t next_msg_sz;
     stream->NextMessageSize(&next_msg_sz);
     gpr_log(GPR_INFO, "Streamed Unary Next Message Size is %u", next_msg_sz);
-    GPR_ASSERT(stream->Read(&req));
+    CHECK(stream->Read(&req));
     resp.set_message(req.message() + "_dup");
-    GPR_ASSERT(stream->Write(resp));
+    CHECK(stream->Write(resp));
     return Status::OK;
   }
 };
 
 TEST_F(HybridEnd2endTest,
-       AsyncRequestStreamResponseStream_SyncStreamedUnaryDupService) {
+       AsyncRequestStreamResponseStreamSyncStreamedUnaryDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithAsyncMethod_ResponseStream<TestServiceImpl>>
       SType;
@@ -609,15 +611,15 @@ class FullyStreamedUnaryDupPkg
     uint32_t next_msg_sz;
     stream->NextMessageSize(&next_msg_sz);
     gpr_log(GPR_INFO, "Streamed Unary Next Message Size is %u", next_msg_sz);
-    GPR_ASSERT(stream->Read(&req));
+    CHECK(stream->Read(&req));
     resp.set_message(req.message() + "_dup");
-    GPR_ASSERT(stream->Write(resp));
+    CHECK(stream->Write(resp));
     return Status::OK;
   }
 };
 
 TEST_F(HybridEnd2endTest,
-       AsyncRequestStreamResponseStream_SyncFullyStreamedUnaryDupService) {
+       AsyncRequestStreamResponseStreamSyncFullyStreamedUnaryDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithAsyncMethod_ResponseStream<TestServiceImpl>>
       SType;
@@ -648,17 +650,17 @@ class SplitResponseStreamDupPkg
     uint32_t next_msg_sz;
     stream->NextMessageSize(&next_msg_sz);
     gpr_log(GPR_INFO, "Split Streamed Next Message Size is %u", next_msg_sz);
-    GPR_ASSERT(stream->Read(&req));
+    CHECK(stream->Read(&req));
     for (int i = 0; i < kServerDefaultResponseStreamsToSend; i++) {
       resp.set_message(req.message() + std::to_string(i) + "_dup");
-      GPR_ASSERT(stream->Write(resp));
+      CHECK(stream->Write(resp));
     }
     return Status::OK;
   }
 };
 
 TEST_F(HybridEnd2endTest,
-       AsyncRequestStreamResponseStream_SyncSplitStreamedDupService) {
+       AsyncRequestStreamResponseStreamSyncSplitStreamedDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithAsyncMethod_ResponseStream<TestServiceImpl>>
       SType;
@@ -688,17 +690,17 @@ class FullySplitStreamedDupPkg
     uint32_t next_msg_sz;
     stream->NextMessageSize(&next_msg_sz);
     gpr_log(GPR_INFO, "Split Streamed Next Message Size is %u", next_msg_sz);
-    GPR_ASSERT(stream->Read(&req));
+    CHECK(stream->Read(&req));
     for (int i = 0; i < kServerDefaultResponseStreamsToSend; i++) {
       resp.set_message(req.message() + std::to_string(i) + "_dup");
-      GPR_ASSERT(stream->Write(resp));
+      CHECK(stream->Write(resp));
     }
     return Status::OK;
   }
 };
 
 TEST_F(HybridEnd2endTest,
-       AsyncRequestStreamResponseStream_FullySplitStreamedDupService) {
+       asyncRequestStreamResponseStreamFullySplitStreamedDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithAsyncMethod_ResponseStream<TestServiceImpl>>
       SType;
@@ -727,9 +729,9 @@ class FullyStreamedDupPkg : public duplicate::EchoTestService::StreamedService {
     uint32_t next_msg_sz;
     stream->NextMessageSize(&next_msg_sz);
     gpr_log(GPR_INFO, "Streamed Unary Next Message Size is %u", next_msg_sz);
-    GPR_ASSERT(stream->Read(&req));
+    CHECK(stream->Read(&req));
     resp.set_message(req.message() + "_dup");
-    GPR_ASSERT(stream->Write(resp));
+    CHECK(stream->Write(resp));
     return Status::OK;
   }
   Status StreamedResponseStream(
@@ -740,17 +742,17 @@ class FullyStreamedDupPkg : public duplicate::EchoTestService::StreamedService {
     uint32_t next_msg_sz;
     stream->NextMessageSize(&next_msg_sz);
     gpr_log(GPR_INFO, "Split Streamed Next Message Size is %u", next_msg_sz);
-    GPR_ASSERT(stream->Read(&req));
+    CHECK(stream->Read(&req));
     for (int i = 0; i < kServerDefaultResponseStreamsToSend; i++) {
       resp.set_message(req.message() + std::to_string(i) + "_dup");
-      GPR_ASSERT(stream->Write(resp));
+      CHECK(stream->Write(resp));
     }
     return Status::OK;
   }
 };
 
 TEST_F(HybridEnd2endTest,
-       AsyncRequestStreamResponseStream_FullyStreamedDupService) {
+       AsyncRequestStreamResponseStreamFullyStreamedDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithAsyncMethod_ResponseStream<TestServiceImpl>>
       SType;
@@ -770,7 +772,7 @@ TEST_F(HybridEnd2endTest,
 }
 
 // Add a second service with one async method.
-TEST_F(HybridEnd2endTest, AsyncRequestStreamResponseStream_AsyncDupService) {
+TEST_F(HybridEnd2endTest, AsyncRequestStreamResponseStreamAsyncDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithAsyncMethod_ResponseStream<TestServiceImpl>>
       SType;
@@ -866,7 +868,7 @@ TEST_F(HybridEnd2endTest, GenericEchoAsyncRequestStream) {
 }
 
 // Add a second service with one sync method.
-TEST_F(HybridEnd2endTest, GenericEchoAsyncRequestStream_SyncDupService) {
+TEST_F(HybridEnd2endTest, GenericEchoAsyncRequestStreamSyncDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithGenericMethod_Echo<TestServiceImpl>>
       SType;
@@ -886,7 +888,7 @@ TEST_F(HybridEnd2endTest, GenericEchoAsyncRequestStream_SyncDupService) {
 }
 
 // Add a second service with one async method.
-TEST_F(HybridEnd2endTest, GenericEchoAsyncRequestStream_AsyncDupService) {
+TEST_F(HybridEnd2endTest, GenericEchoAsyncRequestStreamAsyncDupService) {
   typedef EchoTestService::WithAsyncMethod_RequestStream<
       EchoTestService::WithGenericMethod_Echo<TestServiceImpl>>
       SType;

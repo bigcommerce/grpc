@@ -1,22 +1,20 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <grpc/support/port_platform.h>
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -33,20 +31,24 @@
 
 #include <gmock/gmock.h>
 
+#include "absl/log/check.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 
+#include <grpc/credentials.h>
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
 #include <grpc/slice.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 #include <grpc/support/string_util.h>
 #include <grpc/support/time.h>
-#include <grpcpp/impl/codegen/service_type.h>
+#include <grpcpp/impl/service_type.h>
 #include <grpcpp/server_builder.h>
 
 #include "src/core/lib/gpr/useful.h"
+#include "src/core/lib/gprpp/crash.h"
 #include "src/core/lib/gprpp/host_port.h"
 #include "src/core/lib/gprpp/thd.h"
 #include "src/core/lib/iomgr/error.h"
@@ -55,14 +57,12 @@
 #include "src/core/lib/security/security_connector/alts/alts_security_connector.h"
 #include "src/core/lib/slice/slice_string_helpers.h"
 #include "test/core/end2end/cq_verifier.h"
+#include "test/core/test_util/fake_udp_and_tcp_server.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/core/tsi/alts/fake_handshaker/fake_handshaker_server.h"
-#include "test/core/util/fake_udp_and_tcp_server.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
 
 namespace {
-
-const int kFakeHandshakeServerMaxConcurrentStreams = 40;
 
 void drain_cq(grpc_completion_queue* cq) {
   grpc_event ev;
@@ -103,19 +103,12 @@ grpc_channel* create_secure_channel_for_test(
 
 class FakeHandshakeServer {
  public:
-  explicit FakeHandshakeServer(bool check_num_concurrent_rpcs) {
+  FakeHandshakeServer() {
     int port = grpc_pick_unused_port_or_die();
     address_ = grpc_core::JoinHostPort("localhost", port);
-    if (check_num_concurrent_rpcs) {
-      service_ = grpc::gcp::
-          CreateFakeHandshakerService(kFakeHandshakeServerMaxConcurrentStreams /* expected max concurrent rpcs */);
-    } else {
-      service_ = grpc::gcp::CreateFakeHandshakerService(
-          0 /* expected max concurrent rpcs unset */);
-    }
+    service_ = grpc::gcp::CreateFakeHandshakerService("peer_identity");
     grpc::ServerBuilder builder;
-    builder.AddListeningPort(address_.c_str(),
-                             grpc::InsecureServerCredentials());
+    builder.AddListeningPort(address_, grpc::InsecureServerCredentials());
     builder.RegisterService(service_.get());
     // TODO(apolcyn): when removing the global concurrent handshake limiting
     // queue, set MAX_CONCURRENT_STREAMS on this server.
@@ -138,8 +131,7 @@ class FakeHandshakeServer {
 
 class TestServer {
  public:
-  explicit TestServer()
-      : fake_handshake_server_(true /* check num concurrent rpcs */) {
+  TestServer() {
     grpc_alts_credentials_options* alts_options =
         grpc_alts_credentials_server_options_create();
     grpc_server_credentials* server_creds =
@@ -152,13 +144,13 @@ class TestServer {
     grpc_server_register_completion_queue(server_, server_cq_, nullptr);
     int port = grpc_pick_unused_port_or_die();
     server_addr_ = grpc_core::JoinHostPort("localhost", port);
-    GPR_ASSERT(grpc_server_add_http2_port(server_, server_addr_.c_str(),
-                                          server_creds));
+    CHECK(grpc_server_add_http2_port(server_, server_addr_.c_str(),
+                                     server_creds));
     grpc_server_credentials_release(server_creds);
     grpc_server_start(server_);
     gpr_log(GPR_DEBUG, "Start TestServer %p. listen on %s", this,
             server_addr_.c_str());
-    server_thd_ = absl::make_unique<std::thread>(PollUntilShutdown, this);
+    server_thd_ = std::make_unique<std::thread>(PollUntilShutdown, this);
   }
 
   ~TestServer() {
@@ -176,8 +168,8 @@ class TestServer {
   static void PollUntilShutdown(const TestServer* self) {
     grpc_event ev = grpc_completion_queue_next(
         self->server_cq_, gpr_inf_future(GPR_CLOCK_REALTIME), nullptr);
-    GPR_ASSERT(ev.type == GRPC_OP_COMPLETE);
-    GPR_ASSERT(ev.tag == self);
+    CHECK(ev.type == GRPC_OP_COMPLETE);
+    CHECK(ev.tag == self);
     gpr_log(GPR_DEBUG, "TestServer %p stop polling", self);
   }
 
@@ -211,7 +203,7 @@ class ConnectLoopRunner {
         loops_(loops),
         expected_connectivity_states_(expected_connectivity_states),
         reconnect_backoff_ms_(reconnect_backoff_ms) {
-    thd_ = absl::make_unique<std::thread>(ConnectLoop, this);
+    thd_ = std::make_unique<std::thread>(ConnectLoop, this);
   }
 
   ~ConnectLoopRunner() { thd_->join(); }
@@ -225,8 +217,6 @@ class ConnectLoopRunner {
           self->server_address_.get(), self->fake_handshake_server_addr_.get(),
           self->reconnect_backoff_ms_);
       // Connect, forcing an ALTS handshake
-      gpr_timespec connect_deadline =
-          grpc_timeout_seconds_to_deadline(self->per_connect_deadline_seconds_);
       grpc_connectivity_state state =
           grpc_channel_check_connectivity_state(channel, 1);
       ASSERT_EQ(state, GRPC_CHANNEL_IDLE);
@@ -240,7 +230,10 @@ class ConnectLoopRunner {
         grpc_channel_watch_connectivity_state(
             channel, state, gpr_inf_future(GPR_CLOCK_REALTIME), cq, nullptr);
         grpc_event ev =
-            grpc_completion_queue_next(cq, connect_deadline, nullptr);
+            grpc_completion_queue_next(cq,
+                                       grpc_timeout_seconds_to_deadline(
+                                           self->per_connect_deadline_seconds_),
+                                       nullptr);
         ASSERT_EQ(ev.type, GRPC_OP_COMPLETE)
             << "connect_loop runner:" << std::hex << self
             << " got ev.type:" << ev.type << " i:" << i;
@@ -283,33 +276,30 @@ class ConnectLoopRunner {
 // Perform a few ALTS handshakes sequentially (using the fake, in-process ALTS
 // handshake server).
 TEST(AltsConcurrentConnectivityTest, TestBasicClientServerHandshakes) {
-  FakeHandshakeServer fake_handshake_server(
-      true /* check num concurrent rpcs */);
+  FakeHandshakeServer fake_handshake_server;
   TestServer test_server;
   {
     ConnectLoopRunner runner(
         test_server.address(), fake_handshake_server.address(),
-        5 /* per connect deadline seconds */, 10 /* loops */,
+        10 /* per connect deadline seconds */, 10 /* loops */,
         GRPC_CHANNEL_READY /* expected connectivity states */,
         0 /* reconnect_backoff_ms unset */);
   }
 }
 
-/* Run a bunch of concurrent ALTS handshakes on concurrent channels
- * (using the fake, in-process handshake server). */
+// Run a bunch of concurrent ALTS handshakes on concurrent channels
+// (using the fake, in-process handshake server).
 TEST(AltsConcurrentConnectivityTest, TestConcurrentClientServerHandshakes) {
-  FakeHandshakeServer fake_handshake_server(
-      true /* check num concurrent rpcs */);
+  FakeHandshakeServer fake_handshake_server;
   // Test
   {
     TestServer test_server;
-    gpr_timespec test_deadline = grpc_timeout_seconds_to_deadline(20);
     size_t num_concurrent_connects = 50;
     std::vector<std::unique_ptr<ConnectLoopRunner>> connect_loop_runners;
     gpr_log(GPR_DEBUG,
             "start performing concurrent expected-to-succeed connects");
     for (size_t i = 0; i < num_concurrent_connects; i++) {
-      connect_loop_runners.push_back(absl::make_unique<ConnectLoopRunner>(
+      connect_loop_runners.push_back(std::make_unique<ConnectLoopRunner>(
           test_server.address(), fake_handshake_server.address(),
           15 /* per connect deadline seconds */, 5 /* loops */,
           GRPC_CHANNEL_READY /* expected connectivity states */,
@@ -318,18 +308,14 @@ TEST(AltsConcurrentConnectivityTest, TestConcurrentClientServerHandshakes) {
     connect_loop_runners.clear();
     gpr_log(GPR_DEBUG,
             "done performing concurrent expected-to-succeed connects");
-    if (gpr_time_cmp(gpr_now(GPR_CLOCK_MONOTONIC), test_deadline) > 0) {
-      gpr_log(GPR_DEBUG, "Test took longer than expected.");
-      abort();
-    }
   }
 }
 
-/* This test is intended to make sure that ALTS handshakes we correctly
- * fail fast when the security handshaker gets an error while reading
- * from the remote peer, after having earlier sent the first bytes of the
- * ALTS handshake to the peer, i.e. after getting into the middle of a
- * handshake. */
+// This test is intended to make sure that ALTS handshakes we correctly
+// fail fast when the security handshaker gets an error while reading
+// from the remote peer, after having earlier sent the first bytes of the
+// ALTS handshake to the peer, i.e. after getting into the middle of a
+// handshake.
 TEST(AltsConcurrentConnectivityTest,
      TestHandshakeFailsFastWhenPeerEndpointClosesConnectionAfterAccepting) {
   // Don't enforce the number of concurrent rpcs for the fake handshake
@@ -339,8 +325,7 @@ TEST(AltsConcurrentConnectivityTest,
   // cancellation, and the corresponding fake handshake server's sync
   // method handler returning, enforcing a limit on the number of active
   // RPCs at the fake handshake server would be inherently racey.
-  FakeHandshakeServer fake_handshake_server(
-      false /* check num concurrent rpcs */);
+  FakeHandshakeServer fake_handshake_server;
   // The fake_backend_server emulates a secure (ALTS based) gRPC backend. So
   // it waits for the client to send the first bytes.
   grpc_core::testing::FakeUdpAndTcpServer fake_backend_server(
@@ -349,12 +334,11 @@ TEST(AltsConcurrentConnectivityTest,
       grpc_core::testing::FakeUdpAndTcpServer::
           CloseSocketUponReceivingBytesFromPeer);
   {
-    gpr_timespec test_deadline = grpc_timeout_seconds_to_deadline(20);
     std::vector<std::unique_ptr<ConnectLoopRunner>> connect_loop_runners;
     size_t num_concurrent_connects = 100;
     gpr_log(GPR_DEBUG, "start performing concurrent expected-to-fail connects");
     for (size_t i = 0; i < num_concurrent_connects; i++) {
-      connect_loop_runners.push_back(absl::make_unique<ConnectLoopRunner>(
+      connect_loop_runners.push_back(std::make_unique<ConnectLoopRunner>(
           fake_backend_server.address(), fake_handshake_server.address(),
           10 /* per connect deadline seconds */, 3 /* loops */,
           GRPC_CHANNEL_TRANSIENT_FAILURE /* expected connectivity states */,
@@ -362,17 +346,11 @@ TEST(AltsConcurrentConnectivityTest,
     }
     connect_loop_runners.clear();
     gpr_log(GPR_DEBUG, "done performing concurrent expected-to-fail connects");
-    if (gpr_time_cmp(gpr_now(GPR_CLOCK_MONOTONIC), test_deadline) > 0) {
-      gpr_log(GPR_ERROR,
-              "Exceeded test deadline. ALTS handshakes might not be failing "
-              "fast when the peer endpoint closes the connection abruptly");
-      abort();
-    }
   }
 }
 
-/* This test is intended to make sure that ALTS handshakes correctly
- * fail fast when the ALTS handshake server fails incoming handshakes fast. */
+// This test is intended to make sure that ALTS handshakes correctly
+// fail fast when the ALTS handshake server fails incoming handshakes fast.
 TEST(AltsConcurrentConnectivityTest,
      TestHandshakeFailsFastWhenHandshakeServerClosesConnectionAfterAccepting) {
   // The fake_handshake_server emulates a broken ALTS handshaker, which
@@ -388,12 +366,11 @@ TEST(AltsConcurrentConnectivityTest,
           kWaitForClientToSendFirstBytes,
       grpc_core::testing::FakeUdpAndTcpServer::CloseSocketUponCloseFromPeer);
   {
-    gpr_timespec test_deadline = grpc_timeout_seconds_to_deadline(20);
     std::vector<std::unique_ptr<ConnectLoopRunner>> connect_loop_runners;
     size_t num_concurrent_connects = 100;
     gpr_log(GPR_DEBUG, "start performing concurrent expected-to-fail connects");
     for (size_t i = 0; i < num_concurrent_connects; i++) {
-      connect_loop_runners.push_back(absl::make_unique<ConnectLoopRunner>(
+      connect_loop_runners.push_back(std::make_unique<ConnectLoopRunner>(
           fake_backend_server.address(), fake_handshake_server.address(),
           20 /* per connect deadline seconds */, 2 /* loops */,
           GRPC_CHANNEL_TRANSIENT_FAILURE /* expected connectivity states */,
@@ -401,18 +378,12 @@ TEST(AltsConcurrentConnectivityTest,
     }
     connect_loop_runners.clear();
     gpr_log(GPR_DEBUG, "done performing concurrent expected-to-fail connects");
-    if (gpr_time_cmp(gpr_now(GPR_CLOCK_MONOTONIC), test_deadline) > 0) {
-      gpr_log(GPR_ERROR,
-              "Exceeded test deadline. ALTS handshakes might not be failing "
-              "fast when the handshake server closes new connections");
-      abort();
-    }
   }
 }
 
-/* This test is intended to make sure that ALTS handshakes correctly
- * fail fast when the ALTS handshake server is non-responsive, in which case
- * the overall connection deadline kicks in. */
+// This test is intended to make sure that ALTS handshakes correctly
+// fail fast when the ALTS handshake server is non-responsive, in which case
+// the overall connection deadline kicks in.
 TEST(AltsConcurrentConnectivityTest,
      TestHandshakeFailsFastWhenHandshakeServerHangsAfterAccepting) {
   // fake_handshake_server emulates an insecure server, so send settings first.
@@ -427,12 +398,11 @@ TEST(AltsConcurrentConnectivityTest,
           kWaitForClientToSendFirstBytes,
       grpc_core::testing::FakeUdpAndTcpServer::CloseSocketUponCloseFromPeer);
   {
-    gpr_timespec test_deadline = grpc_timeout_seconds_to_deadline(20);
     std::vector<std::unique_ptr<ConnectLoopRunner>> connect_loop_runners;
     size_t num_concurrent_connects = 100;
     gpr_log(GPR_DEBUG, "start performing concurrent expected-to-fail connects");
     for (size_t i = 0; i < num_concurrent_connects; i++) {
-      connect_loop_runners.push_back(absl::make_unique<ConnectLoopRunner>(
+      connect_loop_runners.push_back(std::make_unique<ConnectLoopRunner>(
           fake_backend_server.address(), fake_handshake_server.address(),
           10 /* per connect deadline seconds */, 2 /* loops */,
           GRPC_CHANNEL_TRANSIENT_FAILURE /* expected connectivity states */,
@@ -440,12 +410,6 @@ TEST(AltsConcurrentConnectivityTest,
     }
     connect_loop_runners.clear();
     gpr_log(GPR_DEBUG, "done performing concurrent expected-to-fail connects");
-    if (gpr_time_cmp(gpr_now(GPR_CLOCK_MONOTONIC), test_deadline) > 0) {
-      gpr_log(GPR_ERROR,
-              "Exceeded test deadline. ALTS handshakes might not be failing "
-              "fast when the handshake server is non-response timeout occurs");
-      abort();
-    }
   }
 }
 

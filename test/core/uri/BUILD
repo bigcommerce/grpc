@@ -13,7 +13,7 @@
 # limitations under the License.
 
 load("//bazel:grpc_build_system.bzl", "grpc_cc_test", "grpc_package")
-load("//test/core/util:grpc_fuzzer.bzl", "grpc_fuzzer")
+load("//test/core/test_util:grpc_fuzzer.bzl", "grpc_fuzzer")
 
 grpc_package(name = "test/core/uri")
 
@@ -24,21 +24,30 @@ grpc_fuzzer(
     srcs = ["uri_fuzzer_test.cc"],
     corpus = "uri_corpus",
     language = "C++",
-    tags = ["no_windows"],
+    tags = [
+        "no_windows",
+        # Without "nofixdeps", "//:grpc" gets substituted with "//:event_engine_base_hdrs"
+        "nofixdeps",
+    ],
     deps = [
+        "//:exec_ctx",
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//:uri_parser",
     ],
 )
 
 grpc_cc_test(
     name = "uri_parser_test",
     srcs = ["uri_parser_test.cc"],
-    external_deps = ["gtest"],
+    external_deps = [
+        "absl/status",
+        "gtest",
+    ],
     language = "C++",
     deps = [
-        "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//:event_engine_base_hdrs",
+        "//:uri_parser",
+        "//test/core/test_util:grpc_test_util_unsecure",
     ],
 )

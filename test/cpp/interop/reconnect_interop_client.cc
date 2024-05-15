@@ -1,25 +1,26 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <memory>
 #include <sstream>
 
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
 
 #include <grpc/grpc.h>
 #include <grpc/support/log.h>
@@ -27,6 +28,7 @@
 #include <grpcpp/client_context.h>
 #include <grpcpp/support/channel_arguments.h>
 
+#include "src/core/lib/gprpp/crash.h"
 #include "src/proto/grpc/testing/empty.pb.h"
 #include "src/proto/grpc/testing/messages.pb.h"
 #include "src/proto/grpc/testing/test.grpc.pb.h"
@@ -56,8 +58,8 @@ using grpc::testing::TLS;
 
 int main(int argc, char** argv) {
   grpc::testing::InitTest(&argc, &argv, true);
-  GPR_ASSERT(absl::GetFlag(FLAGS_server_control_port));
-  GPR_ASSERT(absl::GetFlag(FLAGS_server_retry_port));
+  CHECK(absl::GetFlag(FLAGS_server_control_port));
+  CHECK(absl::GetFlag(FLAGS_server_retry_port));
 
   std::ostringstream server_address;
   server_address << absl::GetFlag(FLAGS_server_host) << ':'
@@ -72,7 +74,7 @@ int main(int argc, char** argv) {
   Empty empty_response;
   Status start_status =
       control_stub->Start(&start_context, reconnect_params, &empty_response);
-  GPR_ASSERT(start_status.ok());
+  CHECK(start_status.ok());
 
   gpr_log(GPR_INFO, "Starting connections with retries.");
   server_address.str("");
@@ -97,14 +99,14 @@ int main(int argc, char** argv) {
                              std::chrono::seconds(kDeadlineSeconds));
   Status retry_status =
       retry_stub->Start(&retry_context, reconnect_params, &empty_response);
-  GPR_ASSERT(retry_status.error_code() == grpc::StatusCode::DEADLINE_EXCEEDED);
+  CHECK(retry_status.error_code() == grpc::StatusCode::DEADLINE_EXCEEDED);
   gpr_log(GPR_INFO, "Done retrying, getting final data from server");
 
   ClientContext stop_context;
   ReconnectInfo response;
   Status stop_status = control_stub->Stop(&stop_context, Empty(), &response);
-  GPR_ASSERT(stop_status.ok());
-  GPR_ASSERT(response.passed() == true);
+  CHECK(stop_status.ok());
+  CHECK(response.passed() == true);
   gpr_log(GPR_INFO, "Passed");
   return 0;
 }

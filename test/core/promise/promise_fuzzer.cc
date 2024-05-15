@@ -19,14 +19,14 @@
 #include <utility>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/types/optional.h"
-#include "absl/utility/utility.h"
 
 #include <grpc/support/log.h>
 
 #include "src/core/lib/promise/activity.h"
-#include "src/core/lib/promise/detail/basic_join.h"
 #include "src/core/lib/promise/join.h"
 #include "src/core/lib/promise/map.h"
 #include "src/core/lib/promise/poll.h"
@@ -65,10 +65,10 @@ class Fuzzer {
         Scheduler{this},
         [this](absl::Status status) {
           // Must only be called once
-          GPR_ASSERT(!done_);
+          CHECK(!done_);
           // If we became certain of the eventual status, verify it.
           if (expected_status_.has_value()) {
-            GPR_ASSERT(status == *expected_status_);
+            CHECK(status == *expected_status_);
           }
           // Mark ourselves done.
           done_ = true;
@@ -89,7 +89,7 @@ class Fuzzer {
           break;
         // Flush any pending wakeups
         case promise_fuzzer::Action::kFlushWakeup:
-          if (wakeup_ != nullptr) absl::exchange(wakeup_, nullptr)();
+          if (wakeup_ != nullptr) std::exchange(wakeup_, nullptr)();
           break;
         // Drop some wakeups (external system closed?)
         case promise_fuzzer::Action::kDropWaker: {
@@ -114,21 +114,30 @@ class Fuzzer {
     }
     ExpectCancelled();
     activity_.reset();
-    if (wakeup_ != nullptr) absl::exchange(wakeup_, nullptr)();
-    GPR_ASSERT(done_);
+    if (wakeup_ != nullptr) std::exchange(wakeup_, nullptr)();
+    CHECK(done_);
   }
 
  private:
   // Schedule wakeups against the fuzzer
   struct Scheduler {
     Fuzzer* fuzzer;
-    // Schedule a wakeup
     template <typename ActivityType>
-    void ScheduleWakeup(ActivityType* activity) {
-      GPR_ASSERT(activity == fuzzer->activity_.get());
-      GPR_ASSERT(fuzzer->wakeup_ == nullptr);
-      fuzzer->wakeup_ = [activity]() { activity->RunScheduledWakeup(); };
-    }
+    class BoundScheduler {
+     public:
+      explicit BoundScheduler(Scheduler scheduler)
+          : fuzzer_(scheduler.fuzzer) {}
+      void ScheduleWakeup() {
+        CHECK(static_cast<ActivityType*>(this) == fuzzer_->activity_.get());
+        CHECK(fuzzer_->wakeup_ == nullptr);
+        fuzzer_->wakeup_ = [this]() {
+          static_cast<ActivityType*>(this)->RunScheduledWakeup();
+        };
+      }
+
+     private:
+      Fuzzer* fuzzer_;
+    };
   };
 
   // We know that if not already finished, the status when finished will be
@@ -295,10 +304,10 @@ class Fuzzer {
           if (!called) {
             if (config.owning()) {
               wakers_[config.waker()].push_back(
-                  Activity::current()->MakeOwningWaker());
+                  GetContext<Activity>()->MakeOwningWaker());
             } else {
               wakers_[config.waker()].push_back(
-                  Activity::current()->MakeNonOwningWaker());
+                  GetContext<Activity>()->MakeNonOwningWaker());
             }
             return Pending();
           }

@@ -22,6 +22,8 @@ grpc_cc_test(
     name = "writes_per_rpc_test",
     srcs = ["writes_per_rpc_test.cc"],
     external_deps = [
+        "absl/log:check",
+        "absl/log:log",
         "gtest",
     ],
     tags = ["no_windows"],
@@ -29,7 +31,12 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:grpc++",
+        "//:server",
+        "//src/core:channel_args",
         "//src/proto/grpc/testing:echo_proto",
-        "//test/core/util:grpc_test_util_base",
+        "//test/core/event_engine:event_engine_test_utils",
+        "//test/core/event_engine/fuzzing_event_engine",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )

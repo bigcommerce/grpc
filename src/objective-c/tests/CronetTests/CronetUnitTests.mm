@@ -26,20 +26,24 @@
 #import <grpc/grpc.h>
 #import <grpc/grpc_cronet.h>
 #import "test/core/end2end/cq_verifier.h"
-#import "test/core/util/port.h"
+#import "test/core/test_util/port.h"
 
 #import <grpc/support/alloc.h>
 #import <grpc/support/log.h>
 
 #import "src/core/lib/channel/channel_args.h"
-#import "src/core/lib/gpr/env.h"
 #import "src/core/lib/gpr/string.h"
 #import "src/core/lib/gpr/tmpfile.h"
+#import "src/core/lib/gprpp/env.h"
 #import "src/core/lib/gprpp/host_port.h"
 #import "test/core/end2end/data/ssl_test_data.h"
-#import "test/core/util/test_config.h"
+#import "test/core/test_util/test_config.h"
 
+#if COCOAPODS
 #import <openssl_grpc/ssl.h>
+#else
+#import <openssl/ssl.h>
+#endif
 
 static void drain_cq(grpc_completion_queue *cq) {
   grpc_event ev;

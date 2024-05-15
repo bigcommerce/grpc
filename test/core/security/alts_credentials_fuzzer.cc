@@ -1,34 +1,38 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <string.h>
 
+#include "absl/log/check.h"
+
+#include <grpc/credentials.h>
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
 #include <grpc/support/string_util.h>
 
-#include "src/core/lib/gpr/env.h"
+#include "src/core/lib/gprpp/crash.h"
+#include "src/core/lib/gprpp/env.h"
 #include "src/core/lib/security/credentials/alts/alts_credentials.h"
 #include "src/core/lib/security/credentials/alts/check_gcp_environment.h"
 #include "src/core/lib/security/credentials/alts/grpc_alts_credentials_options.h"
-#include "test/core/util/fuzzer_util.h"
+#include "test/core/test_util/fuzzer_util.h"
 
 using grpc_core::testing::grpc_fuzzer_get_next_byte;
 using grpc_core::testing::grpc_fuzzer_get_next_string;
@@ -60,11 +64,9 @@ static void read_target_service_accounts(
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  char* grpc_trace_fuzzer = gpr_getenv("GRPC_TRACE_FUZZER");
-  if (squelch && grpc_trace_fuzzer == nullptr) {
+  if (squelch && !grpc_core::GetEnv("GRPC_TRACE_FUZZER").has_value()) {
     gpr_set_log_function(dont_log);
   }
-  gpr_free(grpc_trace_fuzzer);
   input_stream inp = {data, data + size};
   grpc_init();
   bool is_on_gcp = grpc_alts_is_running_on_gcp();
@@ -82,9 +84,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       grpc_channel_credentials* cred = grpc_alts_credentials_create_customized(
           options, handshaker_service_url, enable_untrusted_alts);
       if (!enable_untrusted_alts && !is_on_gcp) {
-        GPR_ASSERT(cred == nullptr);
+        CHECK_EQ(cred, nullptr);
       } else {
-        GPR_ASSERT(cred != nullptr);
+        CHECK_NE(cred, nullptr);
       }
       grpc_channel_credentials_release(cred);
       grpc_alts_credentials_options_destroy(options);
@@ -96,9 +98,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
           grpc_alts_server_credentials_create_customized(
               options, handshaker_service_url, enable_untrusted_alts);
       if (!enable_untrusted_alts && !is_on_gcp) {
-        GPR_ASSERT(cred == nullptr);
+        CHECK_EQ(cred, nullptr);
       } else {
-        GPR_ASSERT(cred != nullptr);
+        CHECK_NE(cred, nullptr);
       }
       grpc_server_credentials_release(cred);
       grpc_alts_credentials_options_destroy(options);

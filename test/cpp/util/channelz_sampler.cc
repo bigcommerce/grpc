@@ -1,26 +1,25 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-#include <grpc/support/port_platform.h>
-
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 #include <unistd.h>
 
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <ostream>
@@ -28,11 +27,14 @@
 #include <string>
 
 #include "absl/flags/flag.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "google/protobuf/text_format.h"
 
 #include <grpc/grpc.h>
+#include <grpc/support/port_platform.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
 #include <grpcpp/create_channel.h>
@@ -45,9 +47,10 @@
 #include <grpcpp/server_context.h>
 
 #include "src/core/lib/json/json.h"
+#include "src/core/lib/json/json_writer.h"
 #include "src/cpp/server/channelz/channelz_service.h"
 #include "src/proto/grpc/channelz/channelz.pb.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/util/test_config.h"
 #include "test/cpp/util/test_credentials_provider.h"
 
@@ -131,9 +134,9 @@ class ChannelzSampler final {
     Status status = channelz_stub_->GetChannel(
         &get_channel_context, get_channel_request, &get_channel_response);
     if (!status.ok()) {
-      gpr_log(GPR_ERROR, "GetChannelRPC failed: %s",
-              get_channel_context.debug_error_string().c_str());
-      GPR_ASSERT(0);
+      LOG(ERROR) << "GetChannelRPC failed: "
+                 << get_channel_context.debug_error_string();
+      CHECK(0);
     }
     return get_channel_response.channel();
   }
@@ -150,9 +153,9 @@ class ChannelzSampler final {
                                                   get_subchannel_request,
                                                   &get_subchannel_response);
     if (!status.ok()) {
-      gpr_log(GPR_ERROR, "GetSubchannelRPC failed: %s",
-              get_subchannel_context.debug_error_string().c_str());
-      GPR_ASSERT(0);
+      LOG(ERROR) << "GetSubchannelRPC failed: "
+                 << get_subchannel_context.debug_error_string();
+      CHECK(0);
     }
     return get_subchannel_response.subchannel();
   }
@@ -168,9 +171,9 @@ class ChannelzSampler final {
     Status status = channelz_stub_->GetSocket(
         &get_socket_context, get_socket_request, &get_socket_response);
     if (!status.ok()) {
-      gpr_log(GPR_ERROR, "GetSocketRPC failed: %s",
-              get_socket_context.debug_error_string().c_str());
-      GPR_ASSERT(0);
+      LOG(ERROR) << "GetSocketRPC failed: "
+                 << get_socket_context.debug_error_string();
+      CHECK(0);
     }
     return get_socket_response.socket();
   }
@@ -295,11 +298,10 @@ class ChannelzSampler final {
         grpc::testing::GetCredentialsProvider()->GetChannelCredentials(
             custom_credentials_type, &channel_args);
     if (!channel_creds) {
-      gpr_log(GPR_ERROR,
-              "Wrong user credential type: %s. Allowed credential types: "
-              "INSECURE_CREDENTIALS, ssl, alts, google_default_credentials.",
-              custom_credentials_type.c_str());
-      GPR_ASSERT(0);
+      LOG(ERROR) << "Wrong user credential type: " << custom_credentials_type
+                 << ". Allowed credential types: INSECURE_CREDENTIALS, ssl, "
+                    "alts, google_default_credentials.";
+      CHECK(0);
     }
     std::shared_ptr<grpc::Channel> channel =
         CreateChannel(server_address, channel_creds);
@@ -322,17 +324,16 @@ class ChannelzSampler final {
           &get_servers_context, get_servers_request, &get_servers_response);
       if (!status.ok()) {
         if (status.error_code() == StatusCode::UNIMPLEMENTED) {
-          gpr_log(GPR_ERROR,
-                  "Error status UNIMPLEMENTED. Please check and make sure "
-                  "channelz has been registered on the server being queried.");
+          LOG(ERROR) << "Error status UNIMPLEMENTED. Please check and make "
+                        "sure channelz has been registered on the server being "
+                        "queried.";
         } else {
-          gpr_log(GPR_ERROR,
-                  "GetServers RPC with GetServersRequest.server_start_id=%d, "
-                  "failed: %s",
-                  int(server_start_id),
-                  get_servers_context.debug_error_string().c_str());
+          LOG(ERROR) << "GetServers RPC with "
+                        "GetServersRequest.server_start_id="
+                     << server_start_id << ", failed: "
+                     << get_servers_context.debug_error_string();
         }
-        GPR_ASSERT(0);
+        CHECK(0);
       }
       for (const auto& _server : get_servers_response.server()) {
         all_servers_.push_back(_server);
@@ -382,12 +383,11 @@ class ChannelzSampler final {
           &get_top_channels_context, get_top_channels_request,
           &get_top_channels_response);
       if (!status.ok()) {
-        gpr_log(GPR_ERROR,
-                "GetTopChannels RPC with "
-                "GetTopChannelsRequest.channel_start_id=%d failed: %s",
-                int(channel_start_id),
-                get_top_channels_context.debug_error_string().c_str());
-        GPR_ASSERT(0);
+        LOG(ERROR) << "GetTopChannels RPC with "
+                      "GetTopChannelsRequest.channel_start_id="
+                   << channel_start_id << " failed: "
+                   << get_top_channels_context.debug_error_string();
+        CHECK(0);
       }
       for (const auto& _topchannel : get_top_channels_response.channel()) {
         top_channels_.push_back(_topchannel);
@@ -471,7 +471,7 @@ class ChannelzSampler final {
     std::string type = "Channel";
     std::string description;
     ::google::protobuf::TextFormat::PrintToString(channel.data(), &description);
-    grpc_core::Json description_json = grpc_core::Json(description);
+    grpc_core::Json description_json = grpc_core::Json::FromString(description);
     StoreEntityInJson(id, type, description_json);
   }
 
@@ -482,7 +482,7 @@ class ChannelzSampler final {
     std::string description;
     ::google::protobuf::TextFormat::PrintToString(subchannel.data(),
                                                   &description);
-    grpc_core::Json description_json = grpc_core::Json(description);
+    grpc_core::Json description_json = grpc_core::Json::FromString(description);
     StoreEntityInJson(id, type, description_json);
   }
 
@@ -492,7 +492,7 @@ class ChannelzSampler final {
     std::string type = "Server";
     std::string description;
     ::google::protobuf::TextFormat::PrintToString(server.data(), &description);
-    grpc_core::Json description_json = grpc_core::Json(description);
+    grpc_core::Json description_json = grpc_core::Json::FromString(description);
     StoreEntityInJson(id, type, description_json);
   }
 
@@ -502,7 +502,7 @@ class ChannelzSampler final {
     std::string type = "Socket";
     std::string description;
     ::google::protobuf::TextFormat::PrintToString(socket.data(), &description);
-    grpc_core::Json description_json = grpc_core::Json(description);
+    grpc_core::Json description_json = grpc_core::Json::FromString(description);
     StoreEntityInJson(id, type, description_json);
   }
 
@@ -522,18 +522,21 @@ class ChannelzSampler final {
     const time_t time_ago = ago.tv_sec;
     ss << std::put_time(std::localtime(&time_ago), "%F %T");
     start = ss.str();
-    grpc_core::Json obj =
-        grpc_core::Json::Object{{"Task", absl::StrFormat("%s_ID%s", type, id)},
-                                {"Start", start},
-                                {"Finish", finish},
-                                {"ID", id},
-                                {"Type", type},
-                                {"Description", description}};
-    json_.mutable_array()->push_back(obj);
+    grpc_core::Json obj = grpc_core::Json::FromObject(
+        {{"Task",
+          grpc_core::Json::FromString(absl::StrFormat("%s_ID%s", type, id))},
+         {"Start", grpc_core::Json::FromString(start)},
+         {"Finish", grpc_core::Json::FromString(finish)},
+         {"ID", grpc_core::Json::FromString(id)},
+         {"Type", grpc_core::Json::FromString(type)},
+         {"Description", description}});
+    json_.push_back(obj);
   }
 
   // Dump data in json
-  std::string DumpJson() { return json_.Dump(); }
+  std::string DumpJson() {
+    return grpc_core::JsonDump(grpc_core::Json::FromArray(json_));
+  }
 
   // Check if one entity has been recorded
   bool CheckID(int64_t id) {
@@ -556,7 +559,7 @@ class ChannelzSampler final {
   std::vector<grpc::channelz::v1::Subchannel> all_subchannels_;
   std::vector<grpc::channelz::v1::Socket> all_sockets_;
   std::unordered_set<int64_t> id_set_;
-  grpc_core::Json json_;
+  grpc_core::Json::Array json_;
   int64_t rpc_timeout_seconds_;
   gpr_timespec now_;
 };

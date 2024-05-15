@@ -16,40 +16,54 @@
 //
 //
 
-#include <grpc/support/port_platform.h>
-
 #include <limits.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <atomic>
 #include <memory>
+#include <string>
 #include <thread>
+#include <tuple>
 
-#include <gmock/gmock.h>
-
-#include "absl/memory/memory.h"
-#include "absl/synchronization/mutex.h"
-#include "absl/synchronization/notification.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/log/check.h"
+#include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
+#include "gtest/gtest.h"
 
 #include <grpc/grpc.h>
-#include <grpc/grpc_posix.h>
-#include <grpc/grpc_security.h>
+#include <grpc/impl/channel_arg_names.h>
+#include <grpc/slice.h>
+#include <grpc/slice_buffer.h>
+#include <grpc/status.h>
+#include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 
+#include "src/core/channelz/channelz.h"
 #include "src/core/ext/transport/chttp2/transport/chttp2_transport.h"
 #include "src/core/ext/transport/chttp2/transport/frame_goaway.h"
 #include "src/core/ext/transport/chttp2/transport/frame_ping.h"
-#include "src/core/lib/channel/channel_stack_builder.h"
-#include "src/core/lib/config/core_configuration.h"
-#include "src/core/lib/gprpp/host_port.h"
+#include "src/core/lib/channel/channel_args.h"
+#include "src/core/lib/gpr/useful.h"
+#include "src/core/lib/gprpp/crash.h"
+#include "src/core/lib/gprpp/notification.h"
+#include "src/core/lib/gprpp/sync.h"
+#include "src/core/lib/iomgr/closure.h"
+#include "src/core/lib/iomgr/endpoint.h"
 #include "src/core/lib/iomgr/endpoint_pair.h"
+#include "src/core/lib/iomgr/error.h"
+#include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/slice/slice.h"
-#include "src/core/lib/slice/slice_string_helpers.h"
-#include "src/core/lib/surface/channel.h"
-#include "src/core/lib/surface/server.h"
+#include "src/core/lib/slice/slice_internal.h"
+#include "src/core/lib/surface/completion_queue.h"
+#include "src/core/server/server.h"
 #include "test/core/end2end/cq_verifier.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
-#include "test/core/util/test_tcp_server.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc_core {
 namespace {
@@ -66,7 +80,7 @@ class GracefulShutdownTest : public ::testing::Test {
   void SetupAndStart() {
     ExecCtx exec_ctx;
     cq_ = grpc_completion_queue_create_for_next(nullptr);
-    cqv_ = absl::make_unique<CqVerifier>(cq_);
+    cqv_ = std::make_unique<CqVerifier>(cq_);
     grpc_arg server_args[] = {
         grpc_channel_arg_integer_create(
             const_cast<char*>(GRPC_ARG_HTTP2_BDP_PROBE), 0),
@@ -83,13 +97,13 @@ class GracefulShutdownTest : public ::testing::Test {
     auto* transport = grpc_create_chttp2_transport(core_server->channel_args(),
                                                    fds_.server, false);
     grpc_endpoint_add_to_pollset(fds_.server, grpc_cq_pollset(cq_));
-    GPR_ASSERT(core_server->SetupTransport(transport, nullptr,
-                                           core_server->channel_args(),
-                                           nullptr) == GRPC_ERROR_NONE);
+    CHECK(core_server->SetupTransport(transport, nullptr,
+                                      core_server->channel_args(),
+                                      nullptr) == absl::OkStatus());
     grpc_chttp2_transport_start_reading(transport, nullptr, nullptr, nullptr);
     // Start polling on the client
-    absl::Notification client_poller_thread_started_notification;
-    client_poll_thread_ = absl::make_unique<std::thread>(
+    Notification client_poller_thread_started_notification;
+    client_poll_thread_ = std::make_unique<std::thread>(
         [this, &client_poller_thread_started_notification]() {
           grpc_completion_queue* client_cq =
               grpc_completion_queue_create_for_next(nullptr);
@@ -102,10 +116,10 @@ class GracefulShutdownTest : public ::testing::Test {
           }
           client_poller_thread_started_notification.Notify();
           while (!shutdown_) {
-            GPR_ASSERT(grpc_completion_queue_next(
-                           client_cq, grpc_timeout_milliseconds_to_deadline(10),
-                           nullptr)
-                           .type == GRPC_QUEUE_TIMEOUT);
+            CHECK(grpc_completion_queue_next(
+                      client_cq, grpc_timeout_milliseconds_to_deadline(10),
+                      nullptr)
+                      .type == GRPC_QUEUE_TIMEOUT);
           }
           grpc_completion_queue_destroy(client_cq);
         });
@@ -125,11 +139,10 @@ class GracefulShutdownTest : public ::testing::Test {
   void ShutdownAndDestroy() {
     shutdown_ = true;
     ExecCtx exec_ctx;
-    grpc_endpoint_shutdown(
-        fds_.client, GRPC_ERROR_CREATE_FROM_STATIC_STRING("Client shutdown"));
+    grpc_endpoint_shutdown(fds_.client, GRPC_ERROR_CREATE("Client shutdown"));
     ExecCtx::Get()->Flush();
     client_poll_thread_->join();
-    GPR_ASSERT(read_end_notification_.WaitForNotificationWithTimeout(
+    CHECK(read_end_notification_.WaitForNotificationWithTimeout(
         absl::Seconds(5)));
     grpc_endpoint_destroy(fds_.client);
     ExecCtx::Get()->Flush();
@@ -144,7 +157,7 @@ class GracefulShutdownTest : public ::testing::Test {
 
   static void OnReadDone(void* arg, grpc_error_handle error) {
     GracefulShutdownTest* self = static_cast<GracefulShutdownTest*>(arg);
-    if (GRPC_ERROR_IS_NONE(error)) {
+    if (error.ok()) {
       {
         MutexLock lock(&self->mu_);
         for (size_t i = 0; i < self->read_buffer_.count; ++i) {
@@ -164,14 +177,34 @@ class GracefulShutdownTest : public ::testing::Test {
 
   // Waits for \a bytes to show up in read_bytes_
   void WaitForReadBytes(absl::string_view bytes) {
-    std::atomic<bool> done{false};
-    {
-      MutexLock lock(&mu_);
-      while (!absl::StrContains(read_bytes_, bytes)) {
-        read_cv_.WaitWithTimeout(&mu_, absl::Seconds(5));
+    auto start_time = absl::Now();
+    MutexLock lock(&mu_);
+    while (true) {
+      auto where = read_bytes_.find(std::string(bytes));
+      if (where != std::string::npos) {
+        read_bytes_ = read_bytes_.substr(where + bytes.size());
+        break;
       }
+      ASSERT_LT(absl::Now() - start_time, absl::Seconds(60));
+      read_cv_.WaitWithTimeout(&mu_, absl::Seconds(5));
     }
-    done = true;
+  }
+
+  std::string WaitForNBytes(size_t bytes) {
+    auto start_time = absl::Now();
+    MutexLock lock(&mu_);
+    while (read_bytes_.size() < bytes) {
+      EXPECT_LT(absl::Now() - start_time, absl::Seconds(60));
+      read_cv_.WaitWithTimeout(&mu_, absl::Seconds(5));
+    }
+    std::string result = read_bytes_.substr(0, bytes);
+    read_bytes_ = read_bytes_.substr(bytes);
+    return result;
+  }
+
+  void WaitForClose() {
+    ASSERT_TRUE(read_end_notification_.WaitForNotificationWithTimeout(
+        absl::Minutes(1)));
   }
 
   void WaitForGoaway(uint32_t last_stream_id, uint32_t error_code = 0,
@@ -187,9 +220,20 @@ class GracefulShutdownTest : public ::testing::Test {
     WaitForReadBytes(expected_bytes);
   }
 
-  void WaitForPing(uint64_t opaque_data) {
-    grpc_slice ping_slice = grpc_chttp2_ping_create(0, opaque_data);
-    WaitForReadBytes(StringViewFromSlice(ping_slice));
+  uint64_t WaitForPing() {
+    grpc_slice ping_slice = grpc_chttp2_ping_create(0, 0);
+    auto whole_ping = StringViewFromSlice(ping_slice);
+    CHECK(whole_ping.size() == 9 + 8);
+    WaitForReadBytes(whole_ping.substr(0, 9));
+    std::string ping = WaitForNBytes(8);
+    return (static_cast<uint64_t>(static_cast<uint8_t>(ping[0])) << 56) |
+           (static_cast<uint64_t>(static_cast<uint8_t>(ping[1])) << 48) |
+           (static_cast<uint64_t>(static_cast<uint8_t>(ping[2])) << 40) |
+           (static_cast<uint64_t>(static_cast<uint8_t>(ping[3])) << 32) |
+           (static_cast<uint64_t>(static_cast<uint8_t>(ping[4])) << 24) |
+           (static_cast<uint64_t>(static_cast<uint8_t>(ping[5])) << 16) |
+           (static_cast<uint64_t>(static_cast<uint8_t>(ping[6])) << 8) |
+           (static_cast<uint64_t>(static_cast<uint8_t>(ping[7])));
   }
 
   void SendPingAck(uint64_t opaque_data) {
@@ -212,20 +256,21 @@ class GracefulShutdownTest : public ::testing::Test {
   }
 
   void WriteBuffer(grpc_slice_buffer* buffer) {
-    absl::Notification on_write_done_notification_;
+    Notification on_write_done_notification_;
     GRPC_CLOSURE_INIT(&on_write_done_, OnWriteDone,
                       &on_write_done_notification_, nullptr);
     grpc_endpoint_write(fds_.client, buffer, &on_write_done_, nullptr,
                         /*max_frame_size=*/INT_MAX);
     ExecCtx::Get()->Flush();
-    GPR_ASSERT(on_write_done_notification_.WaitForNotificationWithTimeout(
+    CHECK(on_write_done_notification_.WaitForNotificationWithTimeout(
         absl::Seconds(5)));
   }
 
   static void OnWriteDone(void* arg, grpc_error_handle error) {
-    GPR_ASSERT(GRPC_ERROR_IS_NONE(error));
-    absl::Notification* on_write_done_notification_ =
-        static_cast<absl::Notification*>(arg);
+    if (!error.ok()) {
+      Crash(absl::StrCat("Write failed: ", error.ToString()));
+    }
+    Notification* on_write_done_notification_ = static_cast<Notification*>(arg);
     on_write_done_notification_->Notify();
   }
 
@@ -238,7 +283,7 @@ class GracefulShutdownTest : public ::testing::Test {
   grpc_closure on_read_done_;
   Mutex mu_;
   CondVar read_cv_;
-  absl::Notification read_end_notification_;
+  Notification read_end_notification_;
   grpc_slice_buffer read_buffer_;
   std::string read_bytes_ ABSL_GUARDED_BY(mu_);
   grpc_closure on_write_done_;
@@ -250,9 +295,9 @@ TEST_F(GracefulShutdownTest, GracefulGoaway) {
   // Wait for first goaway
   WaitForGoaway((1u << 31) - 1);
   // Wait for the ping
-  WaitForPing(0);
+  uint64_t ping_id = WaitForPing();
   // Reply to the ping
-  SendPingAck(0);
+  SendPingAck(ping_id);
   // Wait for final goaway
   WaitForGoaway(0);
   // The shutdown should successfully complete.
@@ -269,13 +314,13 @@ TEST_F(GracefulShutdownTest, RequestStartedBeforeFinalGoaway) {
   grpc_metadata_array_init(&request_metadata_recv);
   error = grpc_server_request_call(server_, &s, &call_details,
                                    &request_metadata_recv, cq_, cq_, Tag(100));
-  GPR_ASSERT(GRPC_CALL_OK == error);
+  CHECK_EQ(error, GRPC_CALL_OK);
   // Initiate shutdown on the server
   grpc_server_shutdown_and_notify(server_, cq_, Tag(1));
   // Wait for first goaway
   WaitForGoaway((1u << 31) - 1);
   // Wait for the ping
-  WaitForPing(0);
+  uint64_t ping_id = WaitForPing();
   // Start a request
   constexpr char kRequestFrame[] =
       "\x00\x00\xbe\x01\x05\x00\x00\x00\x01"
@@ -291,7 +336,7 @@ TEST_F(GracefulShutdownTest, RequestStartedBeforeFinalGoaway) {
       "\x10\x0auser-agent\x17grpc-c/0.12.0.0 (linux)";
   Write(absl::string_view(kRequestFrame, sizeof(kRequestFrame) - 1));
   // Reply to the ping
-  SendPingAck(0);
+  SendPingAck(ping_id);
   // Wait for final goaway with last stream ID 1 to show that the HTTP2
   // transport accepted the stream.
   WaitForGoaway(1);
@@ -316,7 +361,7 @@ TEST_F(GracefulShutdownTest, RequestStartedAfterFinalGoawayIsIgnored) {
   grpc_metadata_array_init(&request_metadata_recv);
   error = grpc_server_request_call(server_, &s, &call_details,
                                    &request_metadata_recv, cq_, cq_, Tag(100));
-  GPR_ASSERT(GRPC_CALL_OK == error);
+  CHECK_EQ(error, GRPC_CALL_OK);
   // Send the request from the client.
   constexpr char kRequestFrame[] =
       "\x00\x00\xbe\x01\x05\x00\x00\x00\x01"
@@ -339,9 +384,9 @@ TEST_F(GracefulShutdownTest, RequestStartedAfterFinalGoawayIsIgnored) {
   // Wait for first goaway
   WaitForGoaway((1u << 31) - 1);
   // Wait for the ping
-  WaitForPing(0);
+  uint64_t ping_id = WaitForPing();
   // Reply to the ping
-  SendPingAck(0);
+  SendPingAck(ping_id);
   // Wait for final goaway
   WaitForGoaway(1);
 
@@ -386,7 +431,7 @@ TEST_F(GracefulShutdownTest, RequestStartedAfterFinalGoawayIsIgnored) {
   op++;
   error = grpc_call_start_batch(s, ops, static_cast<size_t>(op - ops), Tag(101),
                                 nullptr);
-  GPR_ASSERT(GRPC_CALL_OK == error);
+  CHECK_EQ(error, GRPC_CALL_OK);
   cqv_->Expect(Tag(101), true);
   // The shutdown should successfully complete.
   cqv_->Expect(Tag(1), true);
@@ -405,9 +450,9 @@ TEST_F(GracefulShutdownTest, UnresponsiveClient) {
   // Wait for first goaway
   WaitForGoaway((1u << 31) - 1);
   // Wait for the ping
-  WaitForPing(0);
+  std::ignore = WaitForPing();
   // Wait for final goaway without sending a ping ACK.
-  WaitForGoaway(0);
+  WaitForClose();
   EXPECT_GE(absl::Now() - initial_time,
             absl::Seconds(20) -
                 absl::Seconds(

@@ -14,10 +14,9 @@
   # See the License for the specific language governing permissions and
   # limitations under the License.
 
-  FROM silkeh/clang:13
+  FROM silkeh/clang:17-bullseye
 
   <%include file="../../apt_get_basic.include"/>
-  <%include file="../../cxx_deps.include"/>
 
   # Install Python 3.7 from source (and installed as a default python3)
   # (Bullseye comes with Python 3.9 which isn't supported by pytype yet)
@@ -53,7 +52,7 @@
   RUN python3 -m pip install --upgrade --ignore-installed PyYAML==5.4.1 --user
 
   # Install prerequisites for the clang-tidy script
-  RUN apt-get update && apt-get install -y jq git
+  RUN apt-get update && apt-get install -y jq git && apt-get clean
 
   <%include file="../../bazel.include"/>
   <%include file="../../buildifier.include"/>

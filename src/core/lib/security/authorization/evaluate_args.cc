@@ -12,20 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/security/authorization/evaluate_args.h"
 
+#include <string.h>
+
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 
 #include <grpc/grpc_security_constants.h>
 #include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 
+#include "src/core/handshaker/endpoint_info/endpoint_info_handshaker.h"
 #include "src/core/lib/address_utils/parse_address.h"
 #include "src/core/lib/gprpp/host_port.h"
-#include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/security/credentials/tls/tls_utils.h"
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/uri/uri_parser.h"
@@ -54,20 +56,21 @@ EvaluateArgs::PerChannelArgs::Address ParseEndpointUri(
             std::string(port_view).c_str());
   }
   address.address_str = std::string(host_view);
-  grpc_error_handle error = grpc_string_to_sockaddr(
-      &address.address, address.address_str.c_str(), address.port);
-  if (!GRPC_ERROR_IS_NONE(error)) {
-    gpr_log(GPR_DEBUG, "Address %s is not IPv4/IPv6. Error: %s",
-            address.address_str.c_str(), grpc_error_std_string(error).c_str());
+  auto resolved_address = StringToSockaddr(uri->path());
+  if (!resolved_address.ok()) {
+    gpr_log(GPR_DEBUG, "Address \"%s\" is not IPv4/IPv6. Error: %s",
+            uri->path().c_str(), resolved_address.status().ToString().c_str());
+    memset(&address.address, 0, sizeof(address.address));
+  } else {
+    address.address = *resolved_address;
   }
-  GRPC_ERROR_UNREF(error);
   return address;
 }
 
 }  // namespace
 
 EvaluateArgs::PerChannelArgs::PerChannelArgs(grpc_auth_context* auth_context,
-                                             grpc_endpoint* endpoint) {
+                                             const ChannelArgs& args) {
   if (auth_context != nullptr) {
     transport_security_type = GetAuthPropertyValue(
         auth_context, GRPC_TRANSPORT_SECURITY_TYPE_PROPERTY_NAME);
@@ -80,10 +83,10 @@ EvaluateArgs::PerChannelArgs::PerChannelArgs(grpc_auth_context* auth_context,
     subject =
         GetAuthPropertyValue(auth_context, GRPC_X509_SUBJECT_PROPERTY_NAME);
   }
-  if (endpoint != nullptr) {
-    local_address = ParseEndpointUri(grpc_endpoint_get_local_address(endpoint));
-    peer_address = ParseEndpointUri(grpc_endpoint_get_peer(endpoint));
-  }
+  local_address = ParseEndpointUri(
+      args.GetString(GRPC_ARG_ENDPOINT_LOCAL_ADDRESS).value_or(""));
+  peer_address = ParseEndpointUri(
+      args.GetString(GRPC_ARG_ENDPOINT_PEER_ADDRESS).value_or(""));
 }
 
 absl::string_view EvaluateArgs::GetPath() const {

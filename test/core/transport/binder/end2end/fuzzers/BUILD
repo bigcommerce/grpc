@@ -13,7 +13,7 @@
 # limitations under the License.
 
 load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_package", "grpc_proto_library")
-load("//test/core/util:grpc_fuzzer.bzl", "grpc_proto_fuzzer")
+load("//test/core/test_util:grpc_fuzzer.bzl", "grpc_proto_fuzzer")
 
 grpc_package(
     name = "test/core/transport/binder/end2end/fuzzers",
@@ -35,16 +35,19 @@ grpc_proto_library(
 grpc_cc_library(
     name = "fuzzer_utils",
     srcs = ["fuzzer_utils.cc"],
+    external_deps = [
+        "absl/log:check",
+        "absl/log:log",
+    ],
     language = "c++",
     public_hdrs = ["fuzzer_utils.h"],
     deps = [
         "binder_transport_fuzzer_proto",
         "//:gpr",
-        "//:gpr_base",
         "//:grpc++",
         "//:grpc++_base",
         "//:grpc_base",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -54,6 +57,8 @@ grpc_proto_fuzzer(
         "client_fuzzer.cc",
     ],
     corpus = "binder_transport_client_fuzzer_corpus",
+    external_deps = ["absl/log:check"],
+    owner = "binder",
     proto = "client.proto",
     tags = [
         "no_mac",
@@ -63,11 +68,10 @@ grpc_proto_fuzzer(
         "binder_transport_fuzzer_proto",
         ":fuzzer_utils",
         "//:gpr",
-        "//:gpr_base",
         "//:grpc++",
         "//:grpc++_base",
         "//:grpc_base",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -77,6 +81,8 @@ grpc_proto_fuzzer(
         "server_fuzzer.cc",
     ],
     corpus = "binder_transport_server_fuzzer_corpus",
+    external_deps = ["absl/log:check"],
+    owner = "binder",
     proto = "server.proto",
     tags = [
         "no_mac",
@@ -86,10 +92,10 @@ grpc_proto_fuzzer(
         "binder_transport_fuzzer_proto",
         ":fuzzer_utils",
         "//:gpr",
-        "//:gpr_base",
         "//:grpc++",
         "//:grpc++_base",
         "//:grpc_base",
-        "//test/core/util:grpc_test_util",
+        "//src/core:slice",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

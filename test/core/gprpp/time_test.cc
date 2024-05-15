@@ -16,7 +16,7 @@
 
 #include <limits>
 
-#include <gtest/gtest.h>
+#include "gtest/gtest.h"
 
 namespace grpc_core {
 namespace testing {
@@ -30,6 +30,17 @@ TEST(TimestampTest, Infinities) {
             Timestamp::InfFuture());
   EXPECT_EQ(Timestamp::InfPast() + Duration::Milliseconds(1),
             Timestamp::InfPast());
+  EXPECT_EQ(Timestamp::Now() - Timestamp::InfPast(), Duration::Infinity());
+  EXPECT_EQ(Timestamp::Now() - Timestamp::InfFuture(),
+            Duration::NegativeInfinity());
+  EXPECT_EQ(Timestamp::InfPast() - Timestamp::InfPast(),
+            Duration::NegativeInfinity());
+  EXPECT_EQ(Timestamp::InfFuture() - Timestamp::InfPast(),
+            Duration::Infinity());
+  EXPECT_EQ(Timestamp::InfFuture() - Timestamp::InfFuture(),
+            Duration::Infinity());
+  EXPECT_EQ(Timestamp::InfPast() - Timestamp::InfFuture(),
+            Duration::NegativeInfinity());
 }
 
 TEST(TimestampTest, ToString) {
@@ -73,6 +84,13 @@ TEST(DurationTest, Infinities) {
   EXPECT_EQ(Duration::FromSecondsAsDouble(1e100), Duration::Infinity());
   EXPECT_EQ(Duration::FromSecondsAsDouble(-1e100),
             Duration::NegativeInfinity());
+}
+
+TEST(DurationTest, Multiplication) {
+  Duration d = Duration::Seconds(5);
+  EXPECT_EQ(d * 2, Duration::Seconds(10));
+  d *= 3;
+  EXPECT_EQ(d, Duration::Seconds(15));
 }
 
 TEST(DurationTest, FromTimespan) {

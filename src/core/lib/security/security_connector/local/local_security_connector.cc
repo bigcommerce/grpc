@@ -1,22 +1,20 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <grpc/support/port_platform.h>
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "src/core/lib/security/security_connector/local/local_security_connector.h"
 
@@ -25,6 +23,7 @@
 #include <string>
 #include <utility>
 
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
@@ -35,9 +34,12 @@
 #include <grpc/grpc_security_constants.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 #include <grpc/support/string_util.h>
 
-#include "src/core/ext/filters/client_channel/client_channel.h"
+#include "src/core/client_channel/client_channel_filter.h"
+#include "src/core/handshaker/handshaker.h"
+#include "src/core/handshaker/security/security_handshaker.h"
 #include "src/core/lib/address_utils/parse_address.h"
 #include "src/core/lib/address_utils/sockaddr_utils.h"
 #include "src/core/lib/channel/channel_args.h"
@@ -53,13 +55,10 @@
 #include "src/core/lib/iomgr/socket_utils.h"
 #include "src/core/lib/iomgr/unix_sockets_posix.h"
 #include "src/core/lib/promise/arena_promise.h"
-#include "src/core/lib/promise/poll.h"
 #include "src/core/lib/promise/promise.h"
 #include "src/core/lib/security/context/security_context.h"
 #include "src/core/lib/security/credentials/credentials.h"
 #include "src/core/lib/security/credentials/local/local_credentials.h"
-#include "src/core/lib/security/transport/security_handshaker.h"
-#include "src/core/lib/transport/handshaker.h"
 #include "src/core/lib/uri/uri_parser.h"
 #include "src/core/tsi/local_transport_security.h"
 #include "src/core/tsi/transport_security.h"
@@ -73,18 +72,18 @@ namespace {
 
 grpc_core::RefCountedPtr<grpc_auth_context> local_auth_context_create(
     const tsi_peer* peer) {
-  /* Create auth context. */
+  // Create auth context.
   grpc_core::RefCountedPtr<grpc_auth_context> ctx =
       grpc_core::MakeRefCounted<grpc_auth_context>(nullptr);
   grpc_auth_context_add_cstring_property(
       ctx.get(), GRPC_TRANSPORT_SECURITY_TYPE_PROPERTY_NAME,
       GRPC_LOCAL_TRANSPORT_SECURITY_TYPE);
-  GPR_ASSERT(grpc_auth_context_set_peer_identity_property_name(
-                 ctx.get(), GRPC_TRANSPORT_SECURITY_TYPE_PROPERTY_NAME) == 1);
-  GPR_ASSERT(peer->property_count == 1);
+  CHECK(grpc_auth_context_set_peer_identity_property_name(
+            ctx.get(), GRPC_TRANSPORT_SECURITY_TYPE_PROPERTY_NAME) == 1);
+  CHECK_EQ(peer->property_count, 1u);
   const tsi_peer_property* prop = &peer->properties[0];
-  GPR_ASSERT(prop != nullptr);
-  GPR_ASSERT(strcmp(prop->name, TSI_SECURITY_LEVEL_PEER_PROPERTY) == 0);
+  CHECK_NE(prop, nullptr);
+  CHECK_EQ(strcmp(prop->name, TSI_SECURITY_LEVEL_PEER_PROPERTY), 0);
   grpc_auth_context_add_property(ctx.get(),
                                  GRPC_TRANSPORT_SECURITY_LEVEL_PROPERTY_NAME,
                                  prop->value.data, prop->value.length);
@@ -131,8 +130,8 @@ void local_check_peer(tsi_peer peer, grpc_endpoint* ep,
   }
   grpc_error_handle error;
   if (!is_endpoint_local) {
-    error = GRPC_ERROR_CREATE_FROM_STATIC_STRING(
-        "Endpoint is neither UDS or TCP loopback address.");
+    error =
+        GRPC_ERROR_CREATE("Endpoint is neither UDS or TCP loopback address.");
     grpc_core::ExecCtx::Run(DEBUG_LOCATION, on_peer_checked, error);
     return;
   }
@@ -153,16 +152,16 @@ void local_check_peer(tsi_peer peer, grpc_endpoint* ep,
       &peer.properties[peer.property_count]);
   if (result != TSI_OK) return;
   peer.property_count++;
-  /* Create an auth context which is necessary to pass the santiy check in
-   * {client, server}_auth_filter that verifies if the peer's auth context is
-   * obtained during handshakes. The auth context is only checked for its
-   * existence and not actually used.
-   */
+  // Create an auth context which is necessary to pass the santiy check in
+  // {client, server}_auth_filter that verifies if the peer's auth context is
+  // obtained during handshakes. The auth context is only checked for its
+  // existence and not actually used.
+  //
   *auth_context = local_auth_context_create(&peer);
   tsi_peer_destruct(&peer);
-  error = *auth_context != nullptr ? GRPC_ERROR_NONE
-                                   : GRPC_ERROR_CREATE_FROM_STATIC_STRING(
-                                         "Could not create local auth context");
+  error = *auth_context != nullptr
+              ? absl::OkStatus()
+              : GRPC_ERROR_CREATE("Could not create local auth context");
   grpc_core::ExecCtx::Run(DEBUG_LOCATION, on_peer_checked, error);
 }
 
@@ -184,7 +183,7 @@ class grpc_local_channel_security_connector final
       grpc_pollset_set* /*interested_parties*/,
       grpc_core::HandshakeManager* handshake_manager) override {
     tsi_handshaker* handshaker = nullptr;
-    GPR_ASSERT(tsi_local_handshaker_create(&handshaker) == TSI_OK);
+    CHECK(tsi_local_handshaker_create(&handshaker) == TSI_OK);
     handshake_manager->Add(
         grpc_core::SecurityHandshakerCreate(handshaker, this, args));
   }
@@ -199,6 +198,7 @@ class grpc_local_channel_security_connector final
   }
 
   void check_peer(tsi_peer peer, grpc_endpoint* ep,
+                  const grpc_core::ChannelArgs& /*args*/,
                   grpc_core::RefCountedPtr<grpc_auth_context>* auth_context,
                   grpc_closure* on_peer_checked) override {
     grpc_local_credentials* creds =
@@ -208,9 +208,7 @@ class grpc_local_channel_security_connector final
   }
 
   void cancel_check_peer(grpc_closure* /*on_peer_checked*/,
-                         grpc_error_handle error) override {
-    GRPC_ERROR_UNREF(error);
-  }
+                         grpc_error_handle /*error*/) override {}
 
   grpc_core::ArenaPromise<absl::Status> CheckCallHost(
       absl::string_view host, grpc_auth_context*) override {
@@ -240,12 +238,13 @@ class grpc_local_server_security_connector final
       grpc_pollset_set* /*interested_parties*/,
       grpc_core::HandshakeManager* handshake_manager) override {
     tsi_handshaker* handshaker = nullptr;
-    GPR_ASSERT(tsi_local_handshaker_create(&handshaker) == TSI_OK);
+    CHECK(tsi_local_handshaker_create(&handshaker) == TSI_OK);
     handshake_manager->Add(
         grpc_core::SecurityHandshakerCreate(handshaker, this, args));
   }
 
   void check_peer(tsi_peer peer, grpc_endpoint* ep,
+                  const grpc_core::ChannelArgs& /*args*/,
                   grpc_core::RefCountedPtr<grpc_auth_context>* auth_context,
                   grpc_closure* on_peer_checked) override {
     grpc_local_server_credentials* creds =
@@ -255,9 +254,7 @@ class grpc_local_server_security_connector final
   }
 
   void cancel_check_peer(grpc_closure* /*on_peer_checked*/,
-                         grpc_error_handle error) override {
-    GRPC_ERROR_UNREF(error);
-  }
+                         grpc_error_handle /*error*/) override {}
 
   int cmp(const grpc_security_connector* other) const override {
     return server_security_connector_cmp(

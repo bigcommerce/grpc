@@ -1,42 +1,49 @@
-/*
- *
- * Copyright 2017 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2017 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
+#include <inttypes.h>
 #include <net/if.h>
+#include <netdb.h>
 #include <string.h>
+
+#include <grpc/support/alloc.h>
 #ifdef GRPC_HAVE_UNIX_SOCKET
 #include <sys/un.h>
 #endif
 
-#include <gtest/gtest.h>
+#include <string>
 
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
+#include "gtest/gtest.h"
 
 #include <grpc/grpc.h>
-#include <grpc/support/log.h>
 
 #include "src/core/lib/address_utils/parse_address.h"
-#include "src/core/lib/address_utils/sockaddr_utils.h"
+#include "src/core/lib/gprpp/crash.h"
 #include "src/core/lib/gprpp/host_port.h"
-#include "src/core/lib/gprpp/memory.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
+#include "src/core/lib/iomgr/resolved_address.h"
 #include "src/core/lib/iomgr/sockaddr.h"
-#include "src/core/lib/iomgr/socket_utils.h"
-#include "test/core/util/test_config.h"
+#include "src/core/lib/uri/uri_parser.h"
+#include "test/core/test_util/test_config.h"
 
 static void test_grpc_parse_ipv6_parity_with_getaddrinfo(
     const char* target, const struct sockaddr_in6 result_from_getaddrinfo) {
@@ -82,10 +89,9 @@ struct sockaddr_in6 resolve_with_gettaddrinfo(const char* uri_text) {
   struct addrinfo* result;
   int res = getaddrinfo(host.c_str(), port.c_str(), &hints, &result);
   if (res != 0) {
-    gpr_log(GPR_ERROR,
-            "getaddrinfo failed to resolve host:%s port:%s. Error: %d.",
-            host.c_str(), port.c_str(), res);
-    abort();
+    grpc_core::Crash(absl::StrFormat(
+        "getaddrinfo failed to resolve host:%s port:%s. Error: %d.",
+        host.c_str(), port.c_str(), res));
   }
   size_t num_addrs_from_getaddrinfo = 0;
   for (struct addrinfo* resp = result; resp != nullptr; resp = resp->ai_next) {
@@ -108,10 +114,8 @@ TEST(ParseAddressWithNamedScopeIdTest, MainTest) {
   // system recognizes, and then use that for the test.
   for (size_t i = 1; i < 65536; i++) {
     if (if_indextoname(i, arbitrary_interface_name) != nullptr) {
-      gpr_log(GPR_DEBUG,
-              "Found interface at index %" PRIuPTR
-              " named %s. Will use this for the test",
-              i, arbitrary_interface_name);
+      VLOG(2) << "Found interface at index " << i << " named "
+              << arbitrary_interface_name << ". Will use this for the test";
       break;
     }
   }
@@ -121,9 +125,8 @@ TEST(ParseAddressWithNamedScopeIdTest, MainTest) {
   struct sockaddr_in6 result_from_getaddrinfo =
       resolve_with_gettaddrinfo(target.c_str());
   // Run the test
-  gpr_log(GPR_DEBUG,
-          "Run test_grpc_parse_ipv6_parity_with_getaddrinfo with target: %s",
-          target.c_str());
+  VLOG(2) << "Run test_grpc_parse_ipv6_parity_with_getaddrinfo with target: "
+          << target;
   test_grpc_parse_ipv6_parity_with_getaddrinfo(target.c_str(),
                                                result_from_getaddrinfo);
   // Cleanup

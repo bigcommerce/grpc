@@ -1,27 +1,28 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#include <grpc/support/port_platform.h>
+#include "absl/log/check.h"
 
 #include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 
-#include "src/core/ext/transport/chttp2/transport/frame.h"
 #include "src/core/ext/transport/chttp2/transport/internal.h"
+#include "src/core/ext/transport/chttp2/transport/legacy_frame.h"
 #include "src/core/lib/debug/trace.h"
 #include "src/core/lib/gprpp/bitset.h"
 
@@ -45,7 +46,7 @@ static const char* stream_list_id_string(grpc_chttp2_stream_list_id id) {
 
 grpc_core::TraceFlag grpc_trace_http2_stream_state(false, "http2_stream_state");
 
-/* core list management */
+// core list management
 
 static bool stream_list_empty(grpc_chttp2_transport* t,
                               grpc_chttp2_stream_list_id id) {
@@ -58,7 +59,7 @@ static bool stream_list_pop(grpc_chttp2_transport* t,
   grpc_chttp2_stream* s = t->lists[id].head;
   if (s) {
     grpc_chttp2_stream* new_head = s->links[id].next;
-    GPR_ASSERT(s->included.is_set(id));
+    CHECK(s->included.is_set(id));
     if (new_head) {
       t->lists[id].head = new_head;
       new_head->links[id].prev = nullptr;
@@ -78,12 +79,12 @@ static bool stream_list_pop(grpc_chttp2_transport* t,
 
 static void stream_list_remove(grpc_chttp2_transport* t, grpc_chttp2_stream* s,
                                grpc_chttp2_stream_list_id id) {
-  GPR_ASSERT(s->included.is_set(id));
+  CHECK(s->included.is_set(id));
   s->included.clear(id);
   if (s->links[id].prev) {
     s->links[id].prev->links[id].next = s->links[id].next;
   } else {
-    GPR_ASSERT(t->lists[id].head == s);
+    CHECK(t->lists[id].head == s);
     t->lists[id].head = s->links[id].next;
   }
   if (s->links[id].next) {
@@ -112,7 +113,7 @@ static void stream_list_add_tail(grpc_chttp2_transport* t,
                                  grpc_chttp2_stream* s,
                                  grpc_chttp2_stream_list_id id) {
   grpc_chttp2_stream* old_tail;
-  GPR_ASSERT(!s->included.is_set(id));
+  CHECK(!s->included.is_set(id));
   old_tail = t->lists[id].tail;
   s->links[id].next = nullptr;
   s->links[id].prev = old_tail;
@@ -138,11 +139,11 @@ static bool stream_list_add(grpc_chttp2_transport* t, grpc_chttp2_stream* s,
   return true;
 }
 
-/* wrappers for specializations */
+// wrappers for specializations
 
 bool grpc_chttp2_list_add_writable_stream(grpc_chttp2_transport* t,
                                           grpc_chttp2_stream* s) {
-  GPR_ASSERT(s->id != 0);
+  CHECK_NE(s->id, 0u);
   return stream_list_add(t, s, GRPC_CHTTP2_LIST_WRITABLE);
 }
 

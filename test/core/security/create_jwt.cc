@@ -1,42 +1,41 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <stdio.h>
 #include <string.h>
 
+#include <grpc/credentials.h>
 #include <grpc/slice.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
 
-#include "src/core/lib/iomgr/load_file.h"
+#include "src/core/lib/gprpp/crash.h"
 #include "src/core/lib/security/credentials/jwt/jwt_credentials.h"
-#include "test/core/util/cmdline.h"
+#include "test/core/test_util/cmdline.h"
+#include "test/core/test_util/tls_utils.h"
 
 void create_jwt(const char* json_key_file_path, const char* service_url,
                 const char* scope) {
   grpc_auth_json_key key;
   char* jwt;
-  grpc_slice json_key_data;
-  GPR_ASSERT(GRPC_LOG_IF_ERROR(
-      "load_file", grpc_load_file(json_key_file_path, 1, &json_key_data)));
-  key = grpc_auth_json_key_create_from_string(
-      reinterpret_cast<const char*> GRPC_SLICE_START_PTR(json_key_data));
-  grpc_slice_unref(json_key_data);
+  std::string json_key_data =
+      grpc_core::testing::GetFileContents(json_key_file_path);
+  key = grpc_auth_json_key_create_from_string(json_key_data.c_str());
   if (!grpc_auth_json_key_is_valid(&key)) {
     fprintf(stderr, "Could not parse json key.\n");
     fflush(stderr);

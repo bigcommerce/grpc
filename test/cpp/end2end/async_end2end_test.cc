@@ -1,26 +1,29 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <cinttypes>
 #include <memory>
 #include <thread>
 
+#include "absl/log/check.h"
 #include "absl/memory/memory.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
@@ -34,14 +37,17 @@
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
 
-#include "src/core/ext/filters/client_channel/backup_poller.h"
-#include "src/core/lib/gpr/tls.h"
+#include "src/core/client_channel/backup_poller.h"
+#include "src/core/lib/config/config_vars.h"
+#include "src/core/lib/gprpp/crash.h"
+#include "src/core/lib/gprpp/debug_location.h"
 #include "src/core/lib/iomgr/port.h"
 #include "src/proto/grpc/health/v1/health.grpc.pb.h"
 #include "src/proto/grpc/testing/duplicate/echo_duplicate.grpc.pb.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/build.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/util/string_ref_helper.h"
 #include "test/cpp/util/test_credentials_provider.h"
 
@@ -67,23 +73,29 @@ class Verifier {
  public:
   Verifier() : lambda_run_(false) {}
   // Expect sets the expected ok value for a specific tag
-  Verifier& Expect(int i, bool expect_ok) {
-    return ExpectUnless(i, expect_ok, false);
+  Verifier& Expect(
+      int i, bool expect_ok,
+      grpc_core::SourceLocation whence = grpc_core::SourceLocation()) {
+    return ExpectUnless(i, expect_ok, false, whence);
   }
   // ExpectUnless sets the expected ok value for a specific tag
   // unless the tag was already marked seen (as a result of ExpectMaybe)
-  Verifier& ExpectUnless(int i, bool expect_ok, bool seen) {
+  Verifier& ExpectUnless(
+      int i, bool expect_ok, bool seen,
+      grpc_core::SourceLocation whence = grpc_core::SourceLocation()) {
     if (!seen) {
-      expectations_[tag(i)] = expect_ok;
+      expectations_[tag(i)] = {expect_ok, whence};
     }
     return *this;
   }
   // ExpectMaybe sets the expected ok value for a specific tag, but does not
   // require it to appear
   // If it does, sets *seen to true
-  Verifier& ExpectMaybe(int i, bool expect_ok, bool* seen) {
+  Verifier& ExpectMaybe(
+      int i, bool expect_ok, bool* seen,
+      grpc_core::SourceLocation whence = grpc_core::SourceLocation()) {
     if (!*seen) {
-      maybe_expectations_[tag(i)] = MaybeExpect{expect_ok, seen};
+      maybe_expectations_[tag(i)] = MaybeExpect{expect_ok, seen, whence};
     }
     return *this;
   }
@@ -117,7 +129,7 @@ class Verifier {
   // This version of Verify allows optionally ignoring the
   // outcome of the expectation
   void Verify(CompletionQueue* cq, bool ignore_ok) {
-    GPR_ASSERT(!expectations_.empty() || !maybe_expectations_.empty());
+    CHECK(!expectations_.empty() || !maybe_expectations_.empty());
     while (!expectations_.empty()) {
       Next(cq, ignore_ok);
     }
@@ -172,7 +184,7 @@ class Verifier {
     auto it = expectations_.find(got_tag);
     if (it != expectations_.end()) {
       if (!ignore_ok) {
-        EXPECT_EQ(it->second, ok);
+        EXPECT_EQ(it->second.ok, ok) << it->second.ToString(it->first);
       }
       expectations_.erase(it);
     } else {
@@ -183,12 +195,11 @@ class Verifier {
           *it2->second.seen = true;
         }
         if (!ignore_ok) {
-          EXPECT_EQ(it2->second.ok, ok);
+          EXPECT_EQ(it2->second.ok, ok) << it->second.ToString(it->first);
         }
         maybe_expectations_.erase(it2);
       } else {
-        gpr_log(GPR_ERROR, "Unexpected tag: %p", got_tag);
-        abort();
+        grpc_core::Crash(absl::StrFormat("Unexpected tag: %p", got_tag));
       }
     }
   }
@@ -196,9 +207,25 @@ class Verifier {
   struct MaybeExpect {
     bool ok;
     bool* seen;
+    grpc_core::SourceLocation whence;
+    std::string ToString(void* tag) const {
+      return absl::StrCat(
+          "[MaybeExpect] tag=", reinterpret_cast<uintptr_t>(tag),
+          " expect_ok=", ok, " whence=", whence.file(), ":", whence.line());
+    }
   };
 
-  std::map<void*, bool> expectations_;
+  struct DefinitelyExpect {
+    bool ok;
+    grpc_core::SourceLocation whence;
+    std::string ToString(void* tag) const {
+      return absl::StrCat("[Expect] tag=", reinterpret_cast<uintptr_t>(tag),
+                          " expect_ok=", ok, " whence=", whence.file(), ":",
+                          whence.line());
+    }
+  };
+
+  std::map<void*, DefinitelyExpect> expectations_;
   std::map<void*, MaybeExpect> maybe_expectations_;
   bool lambda_run_;
 };
@@ -289,8 +316,7 @@ class AsyncEnd2endTest : public ::testing::TestWithParam<TestScenario> {
     auto server_creds = GetCredentialsProvider()->GetServerCredentials(
         GetParam().credentials_type);
     builder.AddListeningPort(server_address_.str(), server_creds);
-    service_ =
-        absl::make_unique<grpc::testing::EchoTestService::AsyncService>();
+    service_ = std::make_unique<grpc::testing::EchoTestService::AsyncService>();
     builder.RegisterService(service_.get());
     if (GetParam().health_check_service) {
       builder.RegisterService(&health_check_);
@@ -301,7 +327,7 @@ class AsyncEnd2endTest : public ::testing::TestWithParam<TestScenario> {
     // deleted
     std::unique_ptr<ServerBuilderOption> sync_plugin_disabler(
         new ServerBuilderSyncPluginDisabler());
-    builder.SetOption(move(sync_plugin_disabler));
+    builder.SetOption(std::move(sync_plugin_disabler));
     server_ = builder.BuildAndStart();
   }
 
@@ -423,8 +449,7 @@ TEST_P(AsyncEnd2endTest, ReconnectChannel) {
 #ifdef GRPC_POSIX_SOCKET_EV
   // It needs 2 pollset_works to reconnect the channel with polling engine
   // "poll"
-  grpc_core::UniquePtr<char> poller = GPR_GLOBAL_CONFIG_GET(grpc_poll_strategy);
-  if (0 == strcmp(poller.get(), "poll")) {
+  if (grpc_core::ConfigVars::Get().PollStrategy() == "poll") {
     poller_slowdown_factor = 2;
   }
 #endif  // GRPC_POSIX_SOCKET_EV
@@ -956,7 +981,7 @@ TEST_P(AsyncEnd2endTest, ClientInitialMetadataRpc) {
             ToString(client_initial_metadata.find(meta2.first)->second));
   EXPECT_EQ(meta3.second,
             ToString(client_initial_metadata.find(meta3.first)->second));
-  EXPECT_GE(client_initial_metadata.size(), static_cast<size_t>(2));
+  EXPECT_GE(client_initial_metadata.size(), 2);
 
   send_response.set_message(recv_request.message());
   response_writer.Finish(send_response, Status::OK, tag(3));
@@ -1000,7 +1025,7 @@ TEST_P(AsyncEnd2endTest, ServerInitialMetadataRpc) {
             ToString(server_initial_metadata.find(meta1.first)->second));
   EXPECT_EQ(meta2.second,
             ToString(server_initial_metadata.find(meta2.first)->second));
-  EXPECT_EQ(static_cast<size_t>(2), server_initial_metadata.size());
+  EXPECT_EQ(2, server_initial_metadata.size());
 
   send_response.set_message(recv_request.message());
   response_writer.Finish(send_response, Status::OK, tag(5));
@@ -1043,7 +1068,7 @@ TEST_P(AsyncEnd2endTest, ServerInitialMetadataServerStreaming) {
             ToString(server_initial_metadata.find(meta1.first)->second));
   EXPECT_EQ(meta2.second,
             ToString(server_initial_metadata.find(meta2.first)->second));
-  EXPECT_EQ(static_cast<size_t>(2), server_initial_metadata.size());
+  EXPECT_EQ(2, server_initial_metadata.size());
 
   srv_stream.Write(send_response, tag(3));
 
@@ -1103,7 +1128,7 @@ TEST_P(AsyncEnd2endTest, ServerInitialMetadataServerStreamingImplicit) {
             ToString(server_initial_metadata.find(meta1.first)->second));
   EXPECT_EQ(meta2.second,
             ToString(server_initial_metadata.find(meta2.first)->second));
-  EXPECT_EQ(static_cast<size_t>(2), server_initial_metadata.size());
+  EXPECT_EQ(2, server_initial_metadata.size());
 
   srv_stream.Write(send_response, tag(5));
   cli_stream->Read(&recv_response, tag(6));
@@ -1161,7 +1186,7 @@ TEST_P(AsyncEnd2endTest, ServerTrailingMetadataRpc) {
             ToString(server_trailing_metadata.find(meta1.first)->second));
   EXPECT_EQ(meta2.second,
             ToString(server_trailing_metadata.find(meta2.first)->second));
-  EXPECT_EQ(static_cast<size_t>(2), server_trailing_metadata.size());
+  EXPECT_EQ(2, server_trailing_metadata.size());
 }
 
 TEST_P(AsyncEnd2endTest, MetadataRpc) {
@@ -1209,7 +1234,7 @@ TEST_P(AsyncEnd2endTest, MetadataRpc) {
             ToString(client_initial_metadata.find(meta1.first)->second));
   EXPECT_EQ(meta2.second,
             ToString(client_initial_metadata.find(meta2.first)->second));
-  EXPECT_GE(client_initial_metadata.size(), static_cast<size_t>(2));
+  EXPECT_GE(client_initial_metadata.size(), 2);
 
   srv_ctx.AddInitialMetadata(meta3.first, meta3.second);
   srv_ctx.AddInitialMetadata(meta4.first, meta4.second);
@@ -1220,7 +1245,7 @@ TEST_P(AsyncEnd2endTest, MetadataRpc) {
             ToString(server_initial_metadata.find(meta3.first)->second));
   EXPECT_EQ(meta4.second,
             ToString(server_initial_metadata.find(meta4.first)->second));
-  EXPECT_GE(server_initial_metadata.size(), static_cast<size_t>(2));
+  EXPECT_GE(server_initial_metadata.size(), 2);
 
   send_response.set_message(recv_request.message());
   srv_ctx.AddTrailingMetadata(meta5.first, meta5.second);
@@ -1237,7 +1262,7 @@ TEST_P(AsyncEnd2endTest, MetadataRpc) {
             ToString(server_trailing_metadata.find(meta5.first)->second));
   EXPECT_EQ(meta6.second,
             ToString(server_trailing_metadata.find(meta6.first)->second));
-  EXPECT_GE(server_trailing_metadata.size(), static_cast<size_t>(2));
+  EXPECT_GE(server_trailing_metadata.size(), 2);
 }
 
 // Server uses AsyncNotifyWhenDone API to check for cancellation
@@ -1452,7 +1477,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
       // just added
       int got_tag = verif.Expect(tag_idx, expected_server_cq_result)
                         .Next(cq_.get(), ignore_cq_result);
-      GPR_ASSERT((got_tag == tag_idx) || (got_tag == 11 && want_done_tag));
+      CHECK((got_tag == tag_idx) || (got_tag == 11 && want_done_tag));
       if (got_tag == 11) {
         EXPECT_TRUE(srv_ctx.IsCancelled());
         want_done_tag = false;
@@ -1602,7 +1627,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
       // just added
       int got_tag = verif.Expect(tag_idx, expected_cq_result)
                         .Next(cq_.get(), ignore_cq_result);
-      GPR_ASSERT((got_tag == tag_idx) || (got_tag == 11 && want_done_tag));
+      CHECK((got_tag == tag_idx) || (got_tag == 11 && want_done_tag));
       if (got_tag == 11) {
         EXPECT_TRUE(srv_ctx.IsCancelled());
         want_done_tag = false;
@@ -1714,7 +1739,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
 
       do {
         got_tag = verif.Next(cq_.get(), ignore_cq_result);
-        GPR_ASSERT(((got_tag == 3) && !tag_3_done) || (got_tag == 11));
+        CHECK(((got_tag == 3) && !tag_3_done) || (got_tag == 11));
         if (got_tag == 3) {
           tag_3_done = true;
         }
@@ -1742,17 +1767,16 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
     verif.Expect(4, expected_cq_result);
     got_tag = tag_3_done ? 3 : verif.Next(cq_.get(), ignore_cq_result);
     got_tag2 = verif.Next(cq_.get(), ignore_cq_result);
-    GPR_ASSERT((got_tag == 3) || (got_tag == 4) ||
-               (got_tag == 11 && want_done_tag));
-    GPR_ASSERT((got_tag2 == 3) || (got_tag2 == 4) ||
-               (got_tag2 == 11 && want_done_tag));
+    CHECK((got_tag == 3) || (got_tag == 4) || (got_tag == 11 && want_done_tag));
+    CHECK((got_tag2 == 3) || (got_tag2 == 4) ||
+          (got_tag2 == 11 && want_done_tag));
     // If we get 3 and 4, we don't need to wait for 11, but if
     // we get 11, we should also clear 3 and 4
     if (got_tag + got_tag2 != 7) {
       EXPECT_TRUE(srv_ctx.IsCancelled());
       want_done_tag = false;
       got_tag = verif.Next(cq_.get(), ignore_cq_result);
-      GPR_ASSERT((got_tag == 3) || (got_tag == 4));
+      CHECK((got_tag == 3) || (got_tag == 4));
     }
 
     send_response.set_message("Pong");
@@ -1763,17 +1787,16 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
     verif.Expect(6, expected_cq_result);
     got_tag = verif.Next(cq_.get(), ignore_cq_result);
     got_tag2 = verif.Next(cq_.get(), ignore_cq_result);
-    GPR_ASSERT((got_tag == 5) || (got_tag == 6) ||
-               (got_tag == 11 && want_done_tag));
-    GPR_ASSERT((got_tag2 == 5) || (got_tag2 == 6) ||
-               (got_tag2 == 11 && want_done_tag));
+    CHECK((got_tag == 5) || (got_tag == 6) || (got_tag == 11 && want_done_tag));
+    CHECK((got_tag2 == 5) || (got_tag2 == 6) ||
+          (got_tag2 == 11 && want_done_tag));
     // If we get 5 and 6, we don't need to wait for 11, but if
     // we get 11, we should also clear 5 and 6
     if (got_tag + got_tag2 != 11) {
       EXPECT_TRUE(srv_ctx.IsCancelled());
       want_done_tag = false;
       got_tag = verif.Next(cq_.get(), ignore_cq_result);
-      GPR_ASSERT((got_tag == 5) || (got_tag == 6));
+      CHECK((got_tag == 5) || (got_tag == 6));
     }
 
     // This is expected to succeed in all cases
@@ -1784,7 +1807,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
     bool ignore_cq_wd_result =
         ignore_cq_result || (server_try_cancel == CANCEL_BEFORE_PROCESSING);
     got_tag = verif.Next(cq_.get(), ignore_cq_wd_result);
-    GPR_ASSERT((got_tag == 7) || (got_tag == 11 && want_done_tag));
+    CHECK((got_tag == 7) || (got_tag == 11 && want_done_tag));
     if (got_tag == 11) {
       EXPECT_TRUE(srv_ctx.IsCancelled());
       want_done_tag = false;
@@ -1799,7 +1822,7 @@ class AsyncEnd2endServerTryCancelTest : public AsyncEnd2endTest {
     srv_stream.Read(&recv_request, tag(8));
     verif.Expect(8, false);
     got_tag = verif.Next(cq_.get(), ignore_cq_result);
-    GPR_ASSERT((got_tag == 8) || (got_tag == 11 && want_done_tag));
+    CHECK((got_tag == 8) || (got_tag == 11 && want_done_tag));
     if (got_tag == 11) {
       EXPECT_TRUE(srv_ctx.IsCancelled());
       want_done_tag = false;
@@ -1894,7 +1917,7 @@ std::vector<TestScenario> CreateTestScenarios(bool /*test_secure*/,
   for (auto sec = sec_list.begin(); sec != sec_list.end(); sec++) {
     credentials_types.push_back(*sec);
   }
-  GPR_ASSERT(!credentials_types.empty());
+  CHECK(!credentials_types.empty());
 
   messages.push_back("Hello");
   if (test_message_size_limit) {
@@ -1947,7 +1970,9 @@ INSTANTIATE_TEST_SUITE_P(AsyncEnd2endServerTryCancel,
 int main(int argc, char** argv) {
   // Change the backup poll interval from 5s to 100ms to speed up the
   // ReconnectChannel test
-  GPR_GLOBAL_CONFIG_SET(grpc_client_channel_backup_poll_interval_ms, 100);
+  grpc_core::ConfigVars::Overrides overrides;
+  overrides.client_channel_backup_poll_interval_ms = 100;
+  grpc_core::ConfigVars::SetOverrides(overrides);
   grpc::testing::TestEnvironment env(&argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   int ret = RUN_ALL_TESTS();

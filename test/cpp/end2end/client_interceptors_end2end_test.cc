@@ -1,26 +1,27 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <memory>
 #include <vector>
 
 #include <gtest/gtest.h>
 
+#include "absl/log/check.h"
 #include "absl/memory/memory.h"
 
 #include <grpcpp/channel.h>
@@ -28,7 +29,7 @@
 #include <grpcpp/create_channel.h>
 #include <grpcpp/create_channel_posix.h>
 #include <grpcpp/generic/generic_stub.h>
-#include <grpcpp/impl/codegen/proto_utils.h>
+#include <grpcpp/impl/proto_utils.h>
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
@@ -37,8 +38,8 @@
 
 #include "src/core/lib/iomgr/port.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/end2end/interceptors_util.h"
 #include "test/cpp/end2end/test_service_impl.h"
 #include "test/cpp/util/byte_buffer_proto_helper.h"
@@ -48,7 +49,7 @@
 #include <fcntl.h>
 
 #include "src/core/lib/iomgr/socket_utils_posix.h"
-#endif /* GRPC_POSIX_SOCKET */
+#endif  // GRPC_POSIX_SOCKET
 
 namespace grpc {
 namespace testing {
@@ -70,7 +71,7 @@ enum class ChannelType {
   kFdChannel,
 };
 
-/* Hijacks Echo RPC and fills in the expected values */
+// Hijacks Echo RPC and fills in the expected values
 class HijackingInterceptor : public experimental::Interceptor {
  public:
   explicit HijackingInterceptor(experimental::ClientRpcInfo* info) {
@@ -87,7 +88,7 @@ class HijackingInterceptor : public experimental::Interceptor {
             experimental::InterceptionHookPoints::PRE_SEND_INITIAL_METADATA)) {
       auto* map = methods->GetSendInitialMetadata();
       // Check that we can see the test metadata
-      ASSERT_EQ(map->size(), static_cast<unsigned>(1));
+      ASSERT_EQ(map->size(), 1);
       auto iterator = map->begin();
       EXPECT_EQ("testkey", iterator->first);
       EXPECT_EQ("testvalue", iterator->second);
@@ -111,7 +112,7 @@ class HijackingInterceptor : public experimental::Interceptor {
             experimental::InterceptionHookPoints::POST_RECV_INITIAL_METADATA)) {
       auto* map = methods->GetRecvInitialMetadata();
       // Got nothing better to do here for now
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
     }
     if (methods->QueryInterceptionHookPoint(
             experimental::InterceptionHookPoints::POST_RECV_MESSAGE)) {
@@ -140,7 +141,7 @@ class HijackingInterceptor : public experimental::Interceptor {
             experimental::InterceptionHookPoints::PRE_RECV_INITIAL_METADATA)) {
       auto* map = methods->GetRecvInitialMetadata();
       // Got nothing better to do here at the moment
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
     }
     if (methods->QueryInterceptionHookPoint(
             experimental::InterceptionHookPoints::PRE_RECV_MESSAGE)) {
@@ -153,7 +154,7 @@ class HijackingInterceptor : public experimental::Interceptor {
             experimental::InterceptionHookPoints::PRE_RECV_STATUS)) {
       auto* map = methods->GetRecvTrailingMetadata();
       // insert the metadata that we want
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
       map->insert(std::make_pair("testkey", "testvalue"));
       auto* status = methods->GetRecvStatus();
       *status = Status(StatusCode::OK, "");
@@ -193,7 +194,7 @@ class HijackingInterceptorMakesAnotherCall : public experimental::Interceptor {
             experimental::InterceptionHookPoints::PRE_SEND_INITIAL_METADATA)) {
       auto* map = methods->GetSendInitialMetadata();
       // Check that we can see the test metadata
-      ASSERT_EQ(map->size(), static_cast<unsigned>(1));
+      ASSERT_EQ(map->size(), 1);
       auto iterator = map->begin();
       EXPECT_EQ("testkey", iterator->first);
       EXPECT_EQ("testvalue", iterator->second);
@@ -233,7 +234,7 @@ class HijackingInterceptorMakesAnotherCall : public experimental::Interceptor {
             experimental::InterceptionHookPoints::POST_RECV_INITIAL_METADATA)) {
       auto* map = methods->GetRecvInitialMetadata();
       // Got nothing better to do here for now
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
     }
     if (methods->QueryInterceptionHookPoint(
             experimental::InterceptionHookPoints::POST_RECV_MESSAGE)) {
@@ -261,7 +262,7 @@ class HijackingInterceptorMakesAnotherCall : public experimental::Interceptor {
             experimental::InterceptionHookPoints::PRE_RECV_INITIAL_METADATA)) {
       auto* map = methods->GetRecvInitialMetadata();
       // Got nothing better to do here at the moment
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
     }
     if (methods->QueryInterceptionHookPoint(
             experimental::InterceptionHookPoints::PRE_RECV_MESSAGE)) {
@@ -274,7 +275,7 @@ class HijackingInterceptorMakesAnotherCall : public experimental::Interceptor {
             experimental::InterceptionHookPoints::PRE_RECV_STATUS)) {
       auto* map = methods->GetRecvTrailingMetadata();
       // insert the metadata that we want
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
       map->insert(std::make_pair("testkey", "testvalue"));
       auto* status = methods->GetRecvStatus();
       *status = Status(StatusCode::OK, "");
@@ -355,7 +356,7 @@ class BidiStreamingRpcHijackingInterceptor : public experimental::Interceptor {
             experimental::InterceptionHookPoints::PRE_RECV_STATUS)) {
       auto* map = methods->GetRecvTrailingMetadata();
       // insert the metadata that we want
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
       map->insert(std::make_pair("testkey", "testvalue"));
       auto* status = methods->GetRecvStatus();
       *status = Status(StatusCode::OK, "");
@@ -447,7 +448,7 @@ class ServerStreamingRpcHijackingInterceptor
             experimental::InterceptionHookPoints::PRE_SEND_INITIAL_METADATA)) {
       auto* map = methods->GetSendInitialMetadata();
       // Check that we can see the test metadata
-      ASSERT_EQ(map->size(), static_cast<unsigned>(1));
+      ASSERT_EQ(map->size(), 1);
       auto iterator = map->begin();
       EXPECT_EQ("testkey", iterator->first);
       EXPECT_EQ("testvalue", iterator->second);
@@ -500,7 +501,7 @@ class ServerStreamingRpcHijackingInterceptor
             experimental::InterceptionHookPoints::PRE_RECV_STATUS)) {
       auto* map = methods->GetRecvTrailingMetadata();
       // insert the metadata that we want
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
       map->insert(std::make_pair("testkey", "testvalue"));
       auto* status = methods->GetRecvStatus();
       *status = Status(StatusCode::OK, "");
@@ -560,7 +561,7 @@ class LoggingInterceptor : public experimental::Interceptor {
             experimental::InterceptionHookPoints::PRE_SEND_INITIAL_METADATA)) {
       auto* map = methods->GetSendInitialMetadata();
       // Check that we can see the test metadata
-      ASSERT_EQ(map->size(), static_cast<unsigned>(1));
+      ASSERT_EQ(map->size(), 1);
       auto iterator = map->begin();
       EXPECT_EQ("testkey", iterator->first);
       EXPECT_EQ("testvalue", iterator->second);
@@ -603,7 +604,7 @@ class LoggingInterceptor : public experimental::Interceptor {
             experimental::InterceptionHookPoints::POST_RECV_INITIAL_METADATA)) {
       auto* map = methods->GetRecvInitialMetadata();
       // Got nothing better to do here for now
-      EXPECT_EQ(map->size(), static_cast<unsigned>(0));
+      EXPECT_EQ(map->size(), 0);
       post_recv_initial_metadata_ = true;
     }
     if (methods->QueryInterceptionHookPoint(
@@ -739,7 +740,7 @@ std::vector<TestScenario> CreateTestScenarios() {
 // TODO(yashykt): Maybe add support for non-posix sockets too
 #ifdef GRPC_POSIX_SOCKET
     scenarios.emplace_back(ChannelType::kFdChannel, rpc_type);
-#endif /* GRPC_POSIX_SOCKET */
+#endif  // GRPC_POSIX_SOCKET
   }
   return scenarios;
 }
@@ -759,19 +760,17 @@ class ParameterizedClientInterceptorsEnd2endTest
 #ifdef GRPC_POSIX_SOCKET
     else if (GetParam().channel_type() == ChannelType::kFdChannel) {
       int flags;
-      GPR_ASSERT(socketpair(AF_UNIX, SOCK_STREAM, 0, sv_) == 0);
+      CHECK_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv_), 0);
       flags = fcntl(sv_[0], F_GETFL, 0);
-      GPR_ASSERT(fcntl(sv_[0], F_SETFL, flags | O_NONBLOCK) == 0);
+      CHECK_EQ(fcntl(sv_[0], F_SETFL, flags | O_NONBLOCK), 0);
       flags = fcntl(sv_[1], F_GETFL, 0);
-      GPR_ASSERT(fcntl(sv_[1], F_SETFL, flags | O_NONBLOCK) == 0);
-      GPR_ASSERT(grpc_set_socket_no_sigpipe_if_possible(sv_[0]) ==
-                 GRPC_ERROR_NONE);
-      GPR_ASSERT(grpc_set_socket_no_sigpipe_if_possible(sv_[1]) ==
-                 GRPC_ERROR_NONE);
+      CHECK_EQ(fcntl(sv_[1], F_SETFL, flags | O_NONBLOCK), 0);
+      CHECK(grpc_set_socket_no_sigpipe_if_possible(sv_[0]) == absl::OkStatus());
+      CHECK(grpc_set_socket_no_sigpipe_if_possible(sv_[1]) == absl::OkStatus());
       server_ = builder.BuildAndStart();
       AddInsecureChannelFromFd(server_.get(), sv_[1]);
     }
-#endif /* GRPC_POSIX_SOCKET */
+#endif  // GRPC_POSIX_SOCKET
   }
 
   ~ParameterizedClientInterceptorsEnd2endTest() override {
@@ -792,7 +791,7 @@ class ParameterizedClientInterceptorsEnd2endTest
       return experimental::CreateCustomInsecureChannelWithInterceptorsFromFd(
           "", sv_[0], ChannelArguments(), std::move(creators));
     }
-#endif /* GRPC_POSIX_SOCKET */
+#endif  // GRPC_POSIX_SOCKET
     return nullptr;
   }
 
@@ -837,10 +836,10 @@ TEST_P(ParameterizedClientInterceptorsEnd2endTest,
   PhonyInterceptor::Reset();
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<LoggingInterceptorFactory>());
+  creators.push_back(std::make_unique<LoggingInterceptorFactory>());
   // Add 20 phony interceptors
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = CreateClientChannel(std::move(creators));
   SendRPC(channel);
@@ -878,7 +877,7 @@ TEST_F(ClientInterceptorsEnd2endTest,
   ChannelArguments args;
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<HijackingInterceptorFactory>());
+  creators.push_back(std::make_unique<HijackingInterceptorFactory>());
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, nullptr, args, std::move(creators));
   MakeCall(channel);
@@ -892,12 +891,12 @@ TEST_F(ClientInterceptorsEnd2endTest, ClientInterceptorHijackingTest) {
   // Add 20 phony interceptors before hijacking interceptor
   creators.reserve(20);
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
-  creators.push_back(absl::make_unique<HijackingInterceptorFactory>());
+  creators.push_back(std::make_unique<HijackingInterceptorFactory>());
   // Add 20 phony interceptors after hijacking interceptor
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
@@ -910,8 +909,8 @@ TEST_F(ClientInterceptorsEnd2endTest, ClientInterceptorLogThenHijackTest) {
   ChannelArguments args;
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<LoggingInterceptorFactory>());
-  creators.push_back(absl::make_unique<HijackingInterceptorFactory>());
+  creators.push_back(std::make_unique<LoggingInterceptorFactory>());
+  creators.push_back(std::make_unique<HijackingInterceptorFactory>());
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
   MakeCall(channel);
@@ -927,14 +926,14 @@ TEST_F(ClientInterceptorsEnd2endTest,
   // Add 5 phony interceptors before hijacking interceptor
   creators.reserve(5);
   for (auto i = 0; i < 5; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   creators.push_back(
       std::unique_ptr<experimental::ClientInterceptorFactoryInterface>(
           new HijackingInterceptorMakesAnotherCallFactory()));
   // Add 7 phony interceptors after hijacking interceptor
   for (auto i = 0; i < 7; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = server_->experimental().InProcessChannelWithInterceptors(
       args, std::move(creators));
@@ -970,10 +969,10 @@ TEST_F(ClientInterceptorsCallbackEnd2endTest,
   PhonyInterceptor::Reset();
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<LoggingInterceptorFactory>());
+  creators.push_back(std::make_unique<LoggingInterceptorFactory>());
   // Add 20 phony interceptors
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = server_->experimental().InProcessChannelWithInterceptors(
       args, std::move(creators));
@@ -989,12 +988,12 @@ TEST_F(ClientInterceptorsCallbackEnd2endTest,
   PhonyInterceptor::Reset();
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<LoggingInterceptorFactory>());
+  creators.push_back(std::make_unique<LoggingInterceptorFactory>());
   // Add 20 phony interceptors
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
-  creators.push_back(absl::make_unique<HijackingInterceptorFactory>());
+  creators.push_back(std::make_unique<HijackingInterceptorFactory>());
   auto channel = server_->experimental().InProcessChannelWithInterceptors(
       args, std::move(creators));
   MakeCallbackCall(channel);
@@ -1009,11 +1008,11 @@ TEST_F(ClientInterceptorsCallbackEnd2endTest,
   PhonyInterceptor::Reset();
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<LoggingInterceptorFactory>());
+  creators.push_back(std::make_unique<LoggingInterceptorFactory>());
   // Add 20 phony interceptors and 20 null interceptors
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
-    creators.push_back(absl::make_unique<NullInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<NullInterceptorFactory>());
   }
   auto channel = server_->experimental().InProcessChannelWithInterceptors(
       args, std::move(creators));
@@ -1047,10 +1046,10 @@ TEST_F(ClientInterceptorsStreamingEnd2endTest, ClientStreamingTest) {
   PhonyInterceptor::Reset();
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<LoggingInterceptorFactory>());
+  creators.push_back(std::make_unique<LoggingInterceptorFactory>());
   // Add 20 phony interceptors
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
@@ -1065,10 +1064,10 @@ TEST_F(ClientInterceptorsStreamingEnd2endTest, ServerStreamingTest) {
   PhonyInterceptor::Reset();
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<LoggingInterceptorFactory>());
+  creators.push_back(std::make_unique<LoggingInterceptorFactory>());
   // Add 20 phony interceptors
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
@@ -1083,7 +1082,7 @@ TEST_F(ClientInterceptorsStreamingEnd2endTest, ClientStreamingHijackingTest) {
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
   creators.push_back(
-      absl::make_unique<ClientStreamingRpcHijackingInterceptorFactory>());
+      std::make_unique<ClientStreamingRpcHijackingInterceptorFactory>());
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
 
@@ -1094,7 +1093,7 @@ TEST_F(ClientInterceptorsStreamingEnd2endTest, ClientStreamingHijackingTest) {
   EchoResponse resp;
   req.mutable_param()->set_echo_metadata(true);
   req.set_message("Hello");
-  string expected_resp = "";
+  string expected_resp;
   auto writer = stub->RequestStream(&ctx, &resp);
   for (int i = 0; i < 10; i++) {
     EXPECT_TRUE(writer->Write(req));
@@ -1113,7 +1112,7 @@ TEST_F(ClientInterceptorsStreamingEnd2endTest, ServerStreamingHijackingTest) {
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
   creators.push_back(
-      absl::make_unique<ServerStreamingRpcHijackingInterceptorFactory>());
+      std::make_unique<ServerStreamingRpcHijackingInterceptorFactory>());
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
   MakeServerStreamingCall(channel);
@@ -1127,7 +1126,7 @@ TEST_F(ClientInterceptorsStreamingEnd2endTest,
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
   creators.push_back(
-      absl::make_unique<ServerStreamingRpcHijackingInterceptorFactory>());
+      std::make_unique<ServerStreamingRpcHijackingInterceptorFactory>());
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
   MakeAsyncCQServerStreamingCall(channel);
@@ -1140,7 +1139,7 @@ TEST_F(ClientInterceptorsStreamingEnd2endTest, BidiStreamingHijackingTest) {
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
   creators.push_back(
-      absl::make_unique<BidiStreamingRpcHijackingInterceptorFactory>());
+      std::make_unique<BidiStreamingRpcHijackingInterceptorFactory>());
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
   MakeBidiStreamingCall(channel);
@@ -1151,10 +1150,10 @@ TEST_F(ClientInterceptorsStreamingEnd2endTest, BidiStreamingTest) {
   PhonyInterceptor::Reset();
   std::vector<std::unique_ptr<experimental::ClientInterceptorFactoryInterface>>
       creators;
-  creators.push_back(absl::make_unique<LoggingInterceptorFactory>());
+  creators.push_back(std::make_unique<LoggingInterceptorFactory>());
   // Add 20 phony interceptors
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
@@ -1196,7 +1195,7 @@ TEST_F(ClientGlobalInterceptorEnd2endTest, PhonyGlobalInterceptor) {
   // Add 20 phony interceptors
   creators.reserve(20);
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
@@ -1219,7 +1218,7 @@ TEST_F(ClientGlobalInterceptorEnd2endTest, LoggingGlobalInterceptor) {
   // Add 20 phony interceptors
   creators.reserve(20);
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
@@ -1243,7 +1242,7 @@ TEST_F(ClientGlobalInterceptorEnd2endTest, HijackingGlobalInterceptor) {
   // Add 20 phony interceptors
   creators.reserve(20);
   for (auto i = 0; i < 20; i++) {
-    creators.push_back(absl::make_unique<PhonyInterceptorFactory>());
+    creators.push_back(std::make_unique<PhonyInterceptorFactory>());
   }
   auto channel = experimental::CreateCustomChannelWithInterceptors(
       server_address_, InsecureChannelCredentials(), args, std::move(creators));
@@ -1262,6 +1261,6 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   int ret = RUN_ALL_TESTS();
   // Make sure that gRPC shuts down cleanly
-  GPR_ASSERT(grpc_wait_until_shutdown(10));
+  CHECK(grpc_wait_until_shutdown(10));
   return ret;
 }

@@ -27,6 +27,7 @@ grpc_cc_library(
     srcs = ["fake_binder.cc"],
     hdrs = ["fake_binder.h"],
     external_deps = [
+        "absl/log:log",
         "absl/memory",
         "absl/random",
         "absl/strings",
@@ -35,7 +36,7 @@ grpc_cc_library(
         "absl/types:variant",
     ],
     deps = [
-        "//:gpr_base",
+        "//:gpr",
         "//:grpc++_binder",
     ],
 )
@@ -49,11 +50,12 @@ grpc_cc_test(
         "gtest",
     ],
     language = "C++",
+    tags = ["no_test_ios"],
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         ":fake_binder",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -62,12 +64,13 @@ grpc_cc_library(
     testonly = 1,
     srcs = ["testing_channel_create.cc"],
     hdrs = ["testing_channel_create.h"],
-    external_deps = [],
+    external_deps = ["absl/log:check"],
     deps = [
         ":fake_binder",
         "//:grpc++_base",
         "//:grpc++_binder",
         "//:grpc_base",
+        "//src/core:channel_args",
     ],
 )
 
@@ -79,8 +82,14 @@ grpc_cc_test(
         "absl/time",
         "gtest",
     ],
+    flaky = True,
     language = "C++",
     tags = [
+        # Flaky on windows
+        "no_windows",
+        "no_mac",
+        "no_test_ios",
+
         # Known race between stream creation and cancellation
         "notsan",
     ],
@@ -88,7 +97,7 @@ grpc_cc_test(
         ":end2end_binder_channel",
         ":fake_binder",
         "//:grpc++_binder",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
         "//test/cpp/end2end:test_service_impl",
     ],
 )
@@ -99,11 +108,12 @@ grpc_cc_test(
     external_deps = [
         "gtest",
     ],
+    tags = ["no_test_ios"],
     deps = [
         "//:grpc++",
         "//:grpc++_binder",
+        "//test/core/test_util:grpc_test_util",
         "//test/core/transport/binder/end2end:fake_binder",
-        "//test/core/util:grpc_test_util",
         "//test/cpp/end2end:test_service_impl",
     ],
 )

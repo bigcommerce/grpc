@@ -25,7 +25,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/time/time.h"
 
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc_binder {
 namespace end2end_testing {
@@ -178,7 +178,7 @@ TEST_P(FakeBinderTest, SendBinder) {
 
   int called2 = 0;
   std::unique_ptr<TransactionReceiver> tx_receiver2 =
-      absl::make_unique<FakeTransactionReceiver>(
+      std::make_unique<FakeTransactionReceiver>(
           nullptr,
           [&](transaction_code_t tx_code, ReadableParcel* parcel, int /*uid*/) {
             int value;

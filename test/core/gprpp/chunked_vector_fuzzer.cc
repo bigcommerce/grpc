@@ -12,19 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <stddef.h>
+
+#include <algorithm>
+#include <map>
+#include <memory>
+#include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
+
+#include <grpc/event_engine/memory_allocator.h>
+#include <grpc/support/log.h>
+
 #include "src/core/lib/gprpp/chunked_vector.h"
+#include "src/core/lib/gprpp/ref_counted_ptr.h"
+#include "src/core/lib/resource_quota/arena.h"
+#include "src/core/lib/resource_quota/memory_quota.h"
 #include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/libfuzzer/libfuzzer_macro.h"
 #include "test/core/gprpp/chunked_vector_fuzzer.pb.h"
 
 bool squelch = true;
 bool leak_check = true;
-
-static auto* g_memory_allocator = new grpc_core::MemoryAllocator(
-    grpc_core::ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator(
-        "test"));
 
 static constexpr size_t kChunkSize = 17;
 using IntHdl = std::shared_ptr<int>;
@@ -38,15 +48,15 @@ struct Comparison {
 
   // Check that both chunked and std are equivalent.
   void AssertOk() const {
-    GPR_ASSERT(std.size() == chunked.size());
+    CHECK(std.size() == chunked.size());
     auto it_chunked = chunked.cbegin();
     auto it_std = std.cbegin();
     while (it_std != std.cend()) {
-      GPR_ASSERT(**it_std == **it_chunked);
+      CHECK(**it_std == **it_chunked);
       ++it_chunked;
       ++it_std;
     }
-    GPR_ASSERT(it_chunked == chunked.cend());
+    CHECK(it_chunked == chunked.cend());
   }
 };
 
@@ -157,7 +167,9 @@ class Fuzzer {
     return &vectors_.emplace(index, Comparison(arena_.get())).first->second;
   }
 
-  ScopedArenaPtr arena_ = MakeScopedArena(128, g_memory_allocator);
+  MemoryAllocator memory_allocator_ = MemoryAllocator(
+      ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator("test"));
+  ScopedArenaPtr arena_ = MakeScopedArena(128, &memory_allocator_);
   std::map<int, Comparison> vectors_;
 };
 }  // namespace grpc_core

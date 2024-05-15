@@ -1,41 +1,52 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include <algorithm>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
+#include "absl/log/check.h"
+#include "absl/strings/match.h"
 
 #include <grpc/byte_buffer.h>
 #include <grpc/byte_buffer_reader.h>
+#include <grpc/credentials.h>
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
-#include <grpc/support/alloc.h>
+#include <grpc/impl/channel_arg_names.h>
+#include <grpc/impl/propagation_bits.h>
+#include <grpc/slice.h>
+#include <grpc/status.h>
 #include <grpc/support/log.h>
 #include <grpc/support/time.h>
 
 #include "src/core/lib/channel/channel_args.h"
-#include "src/core/lib/gpr/env.h"
-#include "src/core/lib/gpr/string.h"
 #include "src/core/lib/gpr/useful.h"
+#include "src/core/lib/slice/slice_internal.h"
 #include "test/core/memory_usage/memstats.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 
 static grpc_channel* channel;
 static grpc_completion_queue* cq;
@@ -81,10 +92,10 @@ static void init_ping_pong_request(int call_idx) {
       grpc_slice_from_static_string("/Reflector/reflectUnary"), &hostname,
       gpr_inf_future(GPR_CLOCK_REALTIME), nullptr);
 
-  GPR_ASSERT(GRPC_CALL_OK == grpc_call_start_batch(calls[call_idx].call,
-                                                   metadata_ops,
-                                                   (size_t)(op - metadata_ops),
-                                                   tag(call_idx), nullptr));
+  CHECK(GRPC_CALL_OK == grpc_call_start_batch(calls[call_idx].call,
+                                              metadata_ops,
+                                              (size_t)(op - metadata_ops),
+                                              tag(call_idx), nullptr));
   grpc_completion_queue_next(cq, gpr_inf_future(GPR_CLOCK_REALTIME), nullptr);
 }
 
@@ -101,10 +112,9 @@ static void finish_ping_pong_request(int call_idx) {
   op->data.recv_status_on_client.status_details = &calls[call_idx].details;
   op++;
 
-  GPR_ASSERT(GRPC_CALL_OK == grpc_call_start_batch(calls[call_idx].call,
-                                                   status_ops,
-                                                   (size_t)(op - status_ops),
-                                                   tag(call_idx), nullptr));
+  CHECK(GRPC_CALL_OK == grpc_call_start_batch(calls[call_idx].call, status_ops,
+                                              (size_t)(op - status_ops),
+                                              tag(call_idx), nullptr));
   grpc_completion_queue_next(cq, gpr_inf_future(GPR_CLOCK_REALTIME), nullptr);
   grpc_metadata_array_destroy(&calls[call_idx].initial_metadata_recv);
   grpc_metadata_array_destroy(&calls[call_idx].trailing_metadata_recv);
@@ -145,12 +155,17 @@ static MemStats send_snapshot_request(int call_idx, grpc_slice call_type) {
   calls[call_idx].call = grpc_channel_create_call(
       channel, nullptr, GRPC_PROPAGATE_DEFAULTS, cq, call_type, &hostname,
       gpr_inf_future(GPR_CLOCK_REALTIME), nullptr);
-  GPR_ASSERT(GRPC_CALL_OK == grpc_call_start_batch(calls[call_idx].call,
-                                                   snapshot_ops,
-                                                   (size_t)(op - snapshot_ops),
-                                                   (void*)nullptr, nullptr));
+  CHECK(GRPC_CALL_OK == grpc_call_start_batch(calls[call_idx].call,
+                                              snapshot_ops,
+                                              (size_t)(op - snapshot_ops),
+                                              (void*)nullptr, nullptr));
   grpc_completion_queue_next(cq, gpr_inf_future(GPR_CLOCK_REALTIME), nullptr);
 
+  gpr_log(GPR_INFO, "Call %d status %d (%s)", call_idx, calls[call_idx].status,
+          std::string(grpc_core::StringViewFromSlice(calls[call_idx].details))
+              .c_str());
+
+  CHECK_NE(response_payload_recv, nullptr);
   grpc_byte_buffer_reader reader;
   grpc_byte_buffer_reader_init(&reader, response_payload_recv);
   grpc_slice response = grpc_byte_buffer_reader_readall(&reader);
@@ -223,7 +238,7 @@ int main(int argc, char** argv) {
   grpc_slice slice = grpc_slice_from_copied_string("x");
   char* fake_argv[1];
 
-  GPR_ASSERT(argc >= 1);
+  CHECK_GE(argc, 1);
   fake_argv[0] = argv[0];
   grpc::testing::TestEnvironment env(&argc, argv);
 
@@ -275,14 +290,16 @@ int main(int argc, char** argv) {
   grpc_completion_queue_destroy(cq);
   grpc_shutdown_blocking();
 
+  const char* prefix = "";
+  if (absl::StartsWith(absl::GetFlag(FLAGS_target), "xds:")) prefix = "xds ";
   printf("---------client stats--------\n");
-  printf("client call memory usage: %f bytes per call\n",
+  printf("%sclient call memory usage: %f bytes per call\n", prefix,
          static_cast<double>(client_calls_inflight.rss -
                              client_benchmark_calls_start.rss) /
              benchmark_iterations * 1024);
 
   printf("---------server stats--------\n");
-  printf("server call memory usage: %f bytes per call\n",
+  printf("%sserver call memory usage: %f bytes per call\n", prefix,
          static_cast<double>(server_calls_inflight.rss -
                              server_benchmark_calls_start.rss) /
              benchmark_iterations * 1024);

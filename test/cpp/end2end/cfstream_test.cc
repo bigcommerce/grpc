@@ -1,20 +1,20 @@
-/*
- *
- * Copyright 2019 The gRPC Authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2019 The gRPC Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <algorithm>
 #include <memory>
@@ -23,6 +23,8 @@
 #include <thread>
 
 #include <gtest/gtest.h>
+
+#include "absl/log/check.h"
 
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
@@ -38,11 +40,12 @@
 #include <grpcpp/server_builder.h>
 
 #include "src/core/lib/backoff/backoff.h"
-#include "src/core/lib/gpr/env.h"
+#include "src/core/lib/gprpp/crash.h"
+#include "src/core/lib/gprpp/env.h"
 #include "src/core/lib/iomgr/port.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/end2end/test_service_impl.h"
 #include "test/cpp/util/test_credentials_provider.h"
 
@@ -187,7 +190,7 @@ class CFStreamTest : public ::testing::TestWithParam<TestScenario> {
     } else if (ret == grpc::CompletionQueue::SHUTDOWN) {
       return false;
     } else {
-      GPR_ASSERT(ret == grpc::CompletionQueue::TIMEOUT);
+      CHECK(ret == grpc::CompletionQueue::TIMEOUT);
       // This can happen if we hit the Apple CFStream bug which results in the
       // read stream freezing. We are ignoring hangs and timeouts, but these
       // tests are still useful as they can catch memory memory corruptions,
@@ -374,7 +377,7 @@ TEST_P(CFStreamTest, NetworkFlapRpcsInFlight) {
 
     while (CQNext(&got_tag, &ok)) {
       ++total_completions;
-      GPR_ASSERT(ok);
+      CHECK(ok);
       AsyncClientCall* call = static_cast<AsyncClientCall*>(got_tag);
       if (!call->status.ok()) {
         gpr_log(GPR_DEBUG, "RPC failed with error: %s",
@@ -421,7 +424,7 @@ TEST_P(CFStreamTest, ConcurrentRpc) {
 
     while (CQNext(&got_tag, &ok)) {
       ++total_completions;
-      GPR_ASSERT(ok);
+      CHECK(ok);
       AsyncClientCall* call = static_cast<AsyncClientCall*>(got_tag);
       if (!call->status.ok()) {
         gpr_log(GPR_DEBUG, "RPC failed with error: %s",
@@ -472,7 +475,7 @@ TEST_P(CFStreamTest, ConcurrentRpc) {
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   grpc::testing::TestEnvironment env(&argc, argv);
-  gpr_setenv("grpc_cfstream", "1");
+  grpc_core::SetEnv("grpc_cfstream", "1");
   const auto result = RUN_ALL_TESTS();
   return result;
 }

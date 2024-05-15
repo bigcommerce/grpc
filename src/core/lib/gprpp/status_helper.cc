@@ -16,15 +16,13 @@
 //
 //
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/gprpp/status_helper.h"
 
 #include <string.h>
 
-#include <algorithm>
 #include <utility>
 
+#include "absl/log/check.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/match.h"
@@ -34,11 +32,11 @@
 #include "absl/time/clock.h"
 #include "google/protobuf/any.upb.h"
 #include "google/rpc/status.upb.h"
-#include "upb/arena.h"
-#include "upb/upb.h"
-#include "upb/upb.hpp"
+#include "upb/base/string_view.h"
+#include "upb/mem/arena.hpp"
 
 #include <grpc/support/log.h>
+#include <grpc/support/port_platform.h>
 
 #include "src/core/lib/slice/percent_encoding.h"
 #include "src/core/lib/slice/slice.h"
@@ -141,8 +139,9 @@ void EncodeUInt32ToBytes(uint32_t v, char* buf) {
 
 uint32_t DecodeUInt32FromBytes(const char* buf) {
   const unsigned char* ubuf = reinterpret_cast<const unsigned char*>(buf);
-  return ubuf[0] | (uint32_t(ubuf[1]) << 8) | (uint32_t(ubuf[2]) << 16) |
-         (uint32_t(ubuf[3]) << 24);
+  return ubuf[0] | (static_cast<uint32_t>(ubuf[1]) << 8) |
+         (static_cast<uint32_t>(ubuf[2]) << 16) |
+         (static_cast<uint32_t>(ubuf[3]) << 24);
 }
 
 std::vector<absl::Status> ParseChildren(absl::Cord children) {
@@ -155,7 +154,7 @@ std::vector<absl::Status> ParseChildren(absl::Cord children) {
   while (buf.size() - cur >= sizeof(uint32_t)) {
     size_t msg_size = DecodeUInt32FromBytes(buf.data() + cur);
     cur += sizeof(uint32_t);
-    GPR_ASSERT(buf.size() - cur >= msg_size);
+    CHECK(buf.size() - cur >= msg_size);
     google_rpc_Status* msg =
         google_rpc_Status_parse(buf.data() + cur, msg_size, arena.ptr());
     cur += msg_size;
@@ -353,7 +352,7 @@ namespace internal {
 
 google_rpc_Status* StatusToProto(const absl::Status& status, upb_Arena* arena) {
   google_rpc_Status* msg = google_rpc_Status_new(arena);
-  google_rpc_Status_set_code(msg, int32_t(status.code()));
+  google_rpc_Status_set_code(msg, static_cast<int32_t>(status.code()));
   // Protobuf string field requires to be utf-8 encoding but C++ string doesn't
   // this requirement so it can be a non utf-8 string. So it should be converted
   // to a percent-encoded string to keep it as a utf-8 string.

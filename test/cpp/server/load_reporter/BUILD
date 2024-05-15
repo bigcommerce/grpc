@@ -26,7 +26,7 @@ grpc_cc_test(
     ],
     deps = [
         "//:lb_load_data_store",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -34,6 +34,9 @@ grpc_cc_test(
     name = "lb_load_reporter_test",
     srcs = ["load_reporter_test.cc"],
     external_deps = [
+        "absl/flags:flag",
+        "absl/log:check",
+        "absl/log:log",
         "gtest",
         "opencensus-stats-test",
     ],
@@ -42,8 +45,8 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:lb_load_reporter",
-        "//:lb_server_load_reporting_filter",
-        "//test/core/util:grpc_test_util",
+        "//src/core:lb_server_load_reporting_filter",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -57,6 +60,6 @@ grpc_cc_test(
         "//:gpr",
         "//:grpc",
         "//:lb_get_cpu_stats",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

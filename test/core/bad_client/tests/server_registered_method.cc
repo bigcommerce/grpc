@@ -1,26 +1,32 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#include <string.h>
+#include "absl/log/check.h"
 
-#include "src/core/lib/surface/server.h"
+#include <grpc/byte_buffer.h>
+#include <grpc/grpc.h>
+#include <grpc/support/log.h>
+#include <grpc/support/time.h>
+
+#include "src/core/server/server.h"
 #include "test/core/bad_client/bad_client.h"
 #include "test/core/end2end/cq_verifier.h"
+#include "test/core/test_util/test_config.h"
 
 #define PFX_STR                                               \
   "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"                          \
@@ -37,8 +43,6 @@
   "\x10\x02te\x08trailers"                                    \
   "\x10\x0auser-agent\"bad-client grpc-c/0.12.0.0 (linux)"
 
-static void* tag(intptr_t t) { return reinterpret_cast<void*>(t); }
-
 static void verifier_succeeds(grpc_server* server, grpc_completion_queue* cq,
                               void* registered_method) {
   grpc_call_error error;
@@ -50,14 +54,14 @@ static void verifier_succeeds(grpc_server* server, grpc_completion_queue* cq,
 
   grpc_metadata_array_init(&request_metadata_recv);
 
-  error = grpc_server_request_registered_call(server, registered_method, &s,
-                                              &deadline, &request_metadata_recv,
-                                              &payload, cq, cq, tag(101));
-  GPR_ASSERT(GRPC_CALL_OK == error);
-  cqv.Expect(tag(101), true);
+  error = grpc_server_request_registered_call(
+      server, registered_method, &s, &deadline, &request_metadata_recv,
+      &payload, cq, cq, grpc_core::CqVerifier::tag(101));
+  CHECK_EQ(error, GRPC_CALL_OK);
+  cqv.Expect(grpc_core::CqVerifier::tag(101), true);
   cqv.Verify();
 
-  GPR_ASSERT(payload != nullptr);
+  CHECK_NE(payload, nullptr);
 
   grpc_metadata_array_destroy(&request_metadata_recv);
   grpc_call_unref(s);
@@ -67,9 +71,9 @@ static void verifier_succeeds(grpc_server* server, grpc_completion_queue* cq,
 static void verifier_fails(grpc_server* server, grpc_completion_queue* cq,
                            void* /*registered_method*/) {
   while (grpc_core::Server::FromC(server)->HasOpenConnections()) {
-    GPR_ASSERT(grpc_completion_queue_next(
-                   cq, grpc_timeout_milliseconds_to_deadline(20), nullptr)
-                   .type == GRPC_QUEUE_TIMEOUT);
+    CHECK(grpc_completion_queue_next(
+              cq, grpc_timeout_milliseconds_to_deadline(20), nullptr)
+              .type == GRPC_QUEUE_TIMEOUT);
   }
 }
 
@@ -77,8 +81,8 @@ int main(int argc, char** argv) {
   grpc::testing::TestEnvironment env(&argc, argv);
   grpc_init();
 
-  /* body generated with
-   * tools/codegen/core/gen_server_registered_method_bad_client_test_body.py */
+  // body generated with
+  // tools/codegen/core/gen_server_registered_method_bad_client_test_body.py
   GRPC_RUN_BAD_CLIENT_TEST(verifier_fails, nullptr,
                            PFX_STR "\x00\x00\x00\x00\x00\x00\x00\x00\x01",
                            GRPC_BAD_CLIENT_DISCONNECT);

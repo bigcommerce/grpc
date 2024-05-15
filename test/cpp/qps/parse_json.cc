@@ -1,26 +1,31 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "test/cpp/qps/parse_json.h"
 
 #include <string>
 
+#include "absl/log/check.h"
+#include "absl/strings/str_format.h"
+
 #include <grpc/support/log.h>
+
+#include "src/core/lib/gprpp/crash.h"
 
 namespace grpc {
 namespace testing {
@@ -36,11 +41,10 @@ void ParseJson(const std::string& json, const std::string& type,
   if (!status.ok()) {
     std::string errmsg(status.message());
     gpr_log(GPR_ERROR, "Failed to convert json to binary: errcode=%d msg=%s",
-            status.code(), errmsg.c_str());
-    gpr_log(GPR_ERROR, "JSON: %s", json.c_str());
-    abort();
+            static_cast<int>(status.code()), errmsg.c_str());
+    grpc_core::Crash(absl::StrFormat("JSON: %s", json.c_str()));
   }
-  GPR_ASSERT(msg->ParseFromString(binary));
+  CHECK(msg->ParseFromString(binary));
 }
 
 std::string SerializeJson(const GRPC_CUSTOM_MESSAGE& msg,
@@ -53,7 +57,7 @@ std::string SerializeJson(const GRPC_CUSTOM_MESSAGE& msg,
   msg.SerializeToString(&binary);
   auto status =
       BinaryToJsonString(type_resolver.get(), type, binary, &json_string);
-  GPR_ASSERT(status.ok());
+  CHECK_OK(status);
   return json_string;
 }
 

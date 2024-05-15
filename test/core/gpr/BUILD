@@ -27,7 +27,7 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -40,27 +40,15 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "env_test",
     srcs = ["env_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
-    uses_event_engine = False,
-    uses_polling = False,
-    deps = [
-        "//:gpr",
-        "//test/core/util:grpc_test_util",
-    ],
-)
-
-grpc_cc_test(
-    name = "log_test",
-    srcs = ["log_test.cc"],
     external_deps = [
+        "absl/log:log",
         "gtest",
     ],
     language = "C++",
@@ -68,20 +56,24 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
-    name = "murmur_hash_test",
-    srcs = ["murmur_hash_test.cc"],
-    external_deps = ["gtest"],
+    name = "log_test",
+    srcs = ["log_test.cc"],
+    external_deps = [
+        "absl/log:check",
+        "absl/log:log",
+        "gtest",
+    ],
     language = "C++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -94,7 +86,7 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -107,7 +99,7 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -120,7 +112,7 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -133,22 +125,7 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//test/core/util:grpc_test_util",
-    ],
-)
-
-grpc_cc_test(
-    name = "tls_test",
-    srcs = ["tls_test.cc"],
-    external_deps = [
-        "gtest",
-    ],
-    language = "C++",
-    uses_event_engine = False,
-    uses_polling = False,
-    deps = [
-        "//:gpr",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -161,7 +138,6 @@ grpc_cc_test(
     uses_polling = False,
     deps = [
         "//:gpr_platform",
-        "//:useful",
-        "//test/core/util:grpc_suppressions",
+        "//src/core:useful",
     ],
 )

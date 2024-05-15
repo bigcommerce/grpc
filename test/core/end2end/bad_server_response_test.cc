@@ -1,42 +1,61 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
+#include <inttypes.h>
 #include <limits.h>
 #include <string.h>
 
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "absl/log/check.h"
+#include "absl/log/log.h"
+
+#include <grpc/credentials.h>
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
+#include <grpc/impl/propagation_bits.h>
 #include <grpc/slice.h>
+#include <grpc/slice_buffer.h>
+#include <grpc/status.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
+#include <grpc/support/atm.h>
+#include <grpc/support/sync.h>
+#include <grpc/support/time.h>
 
-#include "src/core/lib/channel/channel_args.h"
+#include "src/core/lib/event_engine/shim.h"
 #include "src/core/lib/gpr/string.h"
 #include "src/core/lib/gprpp/host_port.h"
-#include "src/core/lib/gprpp/memory.h"
+#include "src/core/lib/gprpp/notification.h"
+#include "src/core/lib/gprpp/status_helper.h"
 #include "src/core/lib/gprpp/thd.h"
-#include "src/core/lib/iomgr/sockaddr.h"
-#include "src/core/lib/slice/slice_internal.h"
+#include "src/core/lib/iomgr/closure.h"
+#include "src/core/lib/iomgr/endpoint.h"
+#include "src/core/lib/iomgr/error.h"
+#include "src/core/lib/iomgr/exec_ctx.h"
+#include "src/core/lib/iomgr/iomgr_fwd.h"
+#include "src/core/lib/iomgr/tcp_server.h"
 #include "src/core/lib/slice/slice_string_helpers.h"
 #include "test/core/end2end/cq_verifier.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
-#include "test/core/util/test_tcp_server.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
+#include "test/core/test_util/test_tcp_server.h"
 
 #define HTTP1_RESP_400                       \
   "HTTP/1.0 400 Bad Request\n"               \
@@ -61,9 +80,9 @@
 #define HTTP2_DETAIL_MSG(STATUS_CODE) \
   "Received http2 header with status: " #STATUS_CODE
 
-/* TODO(zyc) Check the content of incoming data instead of using this length */
-/* The 'bad' server will start sending responses after reading this amount of
- * data from the client. */
+// TODO(zyc) Check the content of incoming data instead of using this length
+// The 'bad' server will start sending responses after reading this amount of
+// data from the client.
 #define SERVER_INCOMING_DATA_LENGTH_LOWER_THRESHOLD (size_t)200
 
 struct rpc_state {
@@ -81,6 +100,7 @@ struct rpc_state {
   const char* response_payload;
   size_t response_payload_length;
   bool connection_attempt_made;
+  std::unique_ptr<grpc_core::Notification> on_connect_done;
 };
 
 static int server_port;
@@ -92,13 +112,13 @@ static grpc_closure on_write;
 static void* tag(intptr_t t) { return reinterpret_cast<void*>(t); }
 
 static void done_write(void* /*arg*/, grpc_error_handle error) {
-  GPR_ASSERT(GRPC_ERROR_IS_NONE(error));
+  CHECK_OK(error);
   gpr_atm_rel_store(&state.done_atm, 1);
 }
 
 static void done_writing_settings_frame(void* /* arg */,
                                         grpc_error_handle error) {
-  GPR_ASSERT(GRPC_ERROR_IS_NONE(error));
+  CHECK_OK(error);
   grpc_endpoint_read(state.tcp, &state.temp_incoming_buffer, &on_read,
                      /*urgent=*/false, /*min_progress_size=*/1);
 }
@@ -114,9 +134,8 @@ static void handle_write() {
 }
 
 static void handle_read(void* /*arg*/, grpc_error_handle error) {
-  if (!GRPC_ERROR_IS_NONE(error)) {
-    gpr_log(GPR_ERROR, "handle_read error: %s",
-            grpc_error_std_string(error).c_str());
+  if (!error.ok()) {
+    LOG(ERROR) << "handle_read error: " << grpc_core::StatusToString(error);
     return;
   }
   state.incoming_data_length += state.temp_incoming_buffer.length;
@@ -125,15 +144,13 @@ static void handle_read(void* /*arg*/, grpc_error_handle error) {
   for (i = 0; i < state.temp_incoming_buffer.count; i++) {
     char* dump = grpc_dump_slice(state.temp_incoming_buffer.slices[i],
                                  GPR_DUMP_HEX | GPR_DUMP_ASCII);
-    gpr_log(GPR_DEBUG, "Server received: %s", dump);
+    VLOG(2) << "Server received: " << dump;
     gpr_free(dump);
   }
 
-  gpr_log(GPR_DEBUG,
-          "got %" PRIuPTR " bytes, expected %" PRIuPTR
-          " bytes or a non-HTTP2 response to be sent",
-          state.incoming_data_length,
-          SERVER_INCOMING_DATA_LENGTH_LOWER_THRESHOLD);
+  VLOG(2) << "got " << state.incoming_data_length << " bytes, expected "
+          << SERVER_INCOMING_DATA_LENGTH_LOWER_THRESHOLD
+          << " bytes or a non-HTTP2 response to be sent";
   if (state.incoming_data_length >=
           SERVER_INCOMING_DATA_LENGTH_LOWER_THRESHOLD ||
       !state.http2_response) {
@@ -171,6 +188,7 @@ static void on_connect(void* arg, grpc_endpoint* tcp,
     grpc_endpoint_read(state.tcp, &state.temp_incoming_buffer, &on_read,
                        /*urgent=*/false, /*min_progress_size=*/1);
   }
+  state.on_connect_done->Notify();
 }
 
 static gpr_timespec n_sec_deadline(int seconds) {
@@ -236,15 +254,15 @@ static void start_rpc(int target_port, grpc_status_code expected_status,
   error = grpc_call_start_batch(state.call, ops, static_cast<size_t>(op - ops),
                                 tag(1), nullptr);
 
-  GPR_ASSERT(GRPC_CALL_OK == error);
+  CHECK_EQ(error, GRPC_CALL_OK);
 
   cqv.Expect(tag(1), true);
   cqv.Verify();
 
-  GPR_ASSERT(status == expected_status);
+  CHECK_EQ(status, expected_status);
   if (expected_detail != nullptr) {
-    GPR_ASSERT(-1 != grpc_slice_slice(details, grpc_slice_from_static_string(
-                                                   expected_detail)));
+    CHECK_NE(-1, grpc_slice_slice(
+                     details, grpc_slice_from_static_string(expected_detail)));
   }
 
   grpc_metadata_array_destroy(&initial_metadata_recv);
@@ -254,8 +272,8 @@ static void start_rpc(int target_port, grpc_status_code expected_status,
 
 static void cleanup_rpc() {
   grpc_event ev;
-  grpc_slice_buffer_destroy_internal(&state.temp_incoming_buffer);
-  grpc_slice_buffer_destroy_internal(&state.outgoing_buffer);
+  grpc_slice_buffer_destroy(&state.temp_incoming_buffer);
+  grpc_slice_buffer_destroy(&state.outgoing_buffer);
   grpc_call_unref(state.call);
   grpc_completion_queue_shutdown(state.cq);
   do {
@@ -278,12 +296,16 @@ static void actually_poll_server(void* arg) {
     bool done = gpr_atm_acq_load(&state.done_atm) != 0;
     gpr_timespec time_left =
         gpr_time_sub(deadline, gpr_now(GPR_CLOCK_REALTIME));
-    gpr_log(GPR_DEBUG, "done=%d, time_left=%" PRId64 ".%09d", done,
-            time_left.tv_sec, time_left.tv_nsec);
+    VLOG(2) << "done=" << done << ", time_left=" << time_left.tv_sec << "."
+            << time_left.tv_nsec;
     if (done || gpr_time_cmp(time_left, gpr_time_0(GPR_TIMESPAN)) < 0) {
       break;
     }
-    test_tcp_server_poll(pa->server, 1000);
+    int milliseconds = 1000;
+    if (grpc_event_engine::experimental::UseEventEngineListener()) {
+      milliseconds = 10;
+    }
+    test_tcp_server_poll(pa->server, milliseconds);
   }
   gpr_event_set(pa->signal_when_done, reinterpret_cast<void*>(1));
   gpr_free(pa);
@@ -316,22 +338,23 @@ static void run_test(bool http2_response, bool send_settings,
   server_port = grpc_pick_unused_port_or_die();
   test_tcp_server_init(&test_server, on_connect, &test_server);
   test_tcp_server_start(&test_server, server_port);
+  state.on_connect_done = std::make_unique<grpc_core::Notification>();
   state.http2_response = http2_response;
   state.send_settings = send_settings;
   state.response_payload = response_payload;
   state.response_payload_length = response_payload_length;
 
-  /* poll server until sending out the response */
+  // poll server until sending out the response
   std::unique_ptr<grpc_core::Thread> thdptr(
       poll_server_until_read_done(&test_server, &ev));
   start_rpc(server_port, expected_status, expected_detail);
   gpr_event_wait(&ev, gpr_inf_future(GPR_CLOCK_REALTIME));
   thdptr->Join();
-  /* Proof that the server accepted the TCP connection. */
-  GPR_ASSERT(state.connection_attempt_made == true);
-  /* clean up */
-  grpc_endpoint_shutdown(state.tcp,
-                         GRPC_ERROR_CREATE_FROM_STATIC_STRING("Test Shutdown"));
+  state.on_connect_done->WaitForNotification();
+  // Proof that the server accepted the TCP connection.
+  CHECK_EQ(state.connection_attempt_made, true);
+  // clean up
+  grpc_endpoint_shutdown(state.tcp, GRPC_ERROR_CREATE("Test Shutdown"));
   grpc_endpoint_destroy(state.tcp);
   cleanup_rpc();
   grpc_core::ExecCtx::Get()->Flush();
@@ -343,7 +366,7 @@ static void run_test(bool http2_response, bool send_settings,
 int main(int argc, char** argv) {
   grpc::testing::TestEnvironment env(&argc, argv);
   grpc_init();
-  /* status defined in hpack static table */
+  // status defined in hpack static table
   run_test(true, true, HTTP2_RESP(204), sizeof(HTTP2_RESP(204)) - 1,
            GRPC_STATUS_UNKNOWN, HTTP2_DETAIL_MSG(204));
   run_test(true, true, HTTP2_RESP(206), sizeof(HTTP2_RESP(206)) - 1,
@@ -357,7 +380,7 @@ int main(int argc, char** argv) {
   run_test(true, true, HTTP2_RESP(500), sizeof(HTTP2_RESP(500)) - 1,
            GRPC_STATUS_UNKNOWN, HTTP2_DETAIL_MSG(500));
 
-  /* status not defined in hpack static table */
+  // status not defined in hpack static table
   run_test(true, true, HTTP2_RESP(401), sizeof(HTTP2_RESP(401)) - 1,
            GRPC_STATUS_UNAUTHENTICATED, HTTP2_DETAIL_MSG(401));
   run_test(true, true, HTTP2_RESP(403), sizeof(HTTP2_RESP(403)) - 1,
@@ -372,19 +395,19 @@ int main(int argc, char** argv) {
            GRPC_STATUS_UNAVAILABLE, HTTP2_DETAIL_MSG(503));
   run_test(true, true, HTTP2_RESP(504), sizeof(HTTP2_RESP(504)) - 1,
            GRPC_STATUS_UNAVAILABLE, HTTP2_DETAIL_MSG(504));
-  /* unparseable response. RPC should fail immediately due to a connect
-   * failure.
-   */
+  // unparseable response. RPC should fail immediately due to a connect
+  // failure.
+  //
   run_test(false, false, UNPARSEABLE_RESP, sizeof(UNPARSEABLE_RESP) - 1,
            GRPC_STATUS_UNAVAILABLE, nullptr);
 
-  /* http1 response. RPC should fail immediately due to a connect failure. */
+  // http1 response. RPC should fail immediately due to a connect failure.
   run_test(false, false, HTTP1_RESP_400, sizeof(HTTP1_RESP_400) - 1,
            GRPC_STATUS_UNAVAILABLE, nullptr);
 
-  /* http2 response without sending a SETTINGs frame. RPC should fail with
-   * DEADLINE_EXCEEDED since the RPC deadline is lower than the connection
-   * attempt deadline. */
+  // http2 response without sending a SETTINGs frame. RPC should fail with
+  // DEADLINE_EXCEEDED since the RPC deadline is lower than the connection
+  // attempt deadline.
   run_test(true, false, HTTP2_RESP(404), sizeof(HTTP2_RESP(404)) - 1,
            GRPC_STATUS_DEADLINE_EXCEEDED, nullptr);
   grpc_shutdown();

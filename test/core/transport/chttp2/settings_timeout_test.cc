@@ -1,46 +1,65 @@
-/*
- *
- * Copyright 2017 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2017 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
+
+#include <inttypes.h>
 
 #include <functional>
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
-#include <gtest/gtest.h>
-
-#include "absl/memory/memory.h"
+#include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "gtest/gtest.h"
 
+#include <grpc/credentials.h>
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
+#include <grpc/impl/channel_arg_names.h>
+#include <grpc/slice.h>
+#include <grpc/slice_buffer.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
+#include <grpc/support/atm.h>
+#include <grpc/support/sync.h>
+#include <grpc/support/time.h>
 
+#include "src/core/lib/channel/channel_args_preconditioning.h"
+#include "src/core/lib/config/core_configuration.h"
+#include "src/core/lib/event_engine/channel_args_endpoint_config.h"
+#include "src/core/lib/gprpp/status_helper.h"
+#include "src/core/lib/gprpp/time.h"
+#include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/endpoint.h"
 #include "src/core/lib/iomgr/error.h"
+#include "src/core/lib/iomgr/exec_ctx.h"
+#include "src/core/lib/iomgr/iomgr_fwd.h"
 #include "src/core/lib/iomgr/pollset.h"
 #include "src/core/lib/iomgr/pollset_set.h"
 #include "src/core/lib/iomgr/resolve_address.h"
+#include "src/core/lib/iomgr/resolved_address.h"
 #include "src/core/lib/iomgr/tcp_client.h"
 #include "src/core/lib/resource_quota/api.h"
-#include "src/core/lib/slice/slice_internal.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc_core {
 namespace test {
@@ -71,7 +90,7 @@ class ServerThread {
     grpc_server_register_completion_queue(server_, cq_, nullptr);
     grpc_server_start(server_);
     thread_ =
-        absl::make_unique<std::thread>(std::bind(&ServerThread::Serve, this));
+        std::make_unique<std::thread>(std::bind(&ServerThread::Serve, this));
     grpc_resource_quota_unref(
         static_cast<grpc_resource_quota*>(a[1].value.pointer.p));
   }
@@ -80,10 +99,10 @@ class ServerThread {
     grpc_completion_queue* shutdown_cq =
         grpc_completion_queue_create_for_pluck(nullptr);
     grpc_server_shutdown_and_notify(server_, shutdown_cq, nullptr);
-    GPR_ASSERT(grpc_completion_queue_pluck(shutdown_cq, nullptr,
-                                           grpc_timeout_seconds_to_deadline(1),
-                                           nullptr)
-                   .type == GRPC_OP_COMPLETE);
+    CHECK(grpc_completion_queue_pluck(shutdown_cq, nullptr,
+                                      grpc_timeout_seconds_to_deadline(1),
+                                      nullptr)
+              .type == GRPC_OP_COMPLETE);
     grpc_completion_queue_destroy(shutdown_cq);
     grpc_server_destroy(server_);
     grpc_completion_queue_destroy(cq_);
@@ -125,13 +144,13 @@ class Client {
     EventState state;
     auto args = CoreConfiguration::Get()
                     .channel_args_preconditioning()
-                    .PreconditionChannelArgs(nullptr)
-                    .ToC();
-    grpc_tcp_client_connect(state.closure(), &endpoint_, pollset_set,
-                            args.get(), addresses_or->data(),
-                            ExecCtx::Get()->Now() + Duration::Seconds(1));
+                    .PreconditionChannelArgs(nullptr);
+    grpc_tcp_client_connect(
+        state.closure(), &endpoint_, pollset_set,
+        grpc_event_engine::experimental::ChannelArgsEndpointConfig(args),
+        addresses_or->data(), Timestamp::Now() + Duration::Seconds(1));
     ASSERT_TRUE(PollUntilDone(&state, Timestamp::InfFuture()));
-    ASSERT_EQ(GRPC_ERROR_NONE, state.error());
+    ASSERT_EQ(absl::OkStatus(), state.error());
     grpc_pollset_set_destroy(pollset_set);
     grpc_endpoint_add_to_pollset(endpoint_, pollset_);
   }
@@ -145,7 +164,7 @@ class Client {
     bool retval = true;
     // Use a deadline of 3 seconds, which is a lot more than we should
     // need for a 1-second timeout, but this helps avoid flakes.
-    Timestamp deadline = ExecCtx::Get()->Now() + Duration::Seconds(3);
+    Timestamp deadline = Timestamp::Now() + Duration::Seconds(3);
     while (true) {
       EventState state;
       grpc_endpoint_read(endpoint_, &read_buffer, state.closure(),
@@ -154,13 +173,12 @@ class Client {
         retval = false;
         break;
       }
-      if (state.error() != GRPC_ERROR_NONE) break;
-      gpr_log(GPR_INFO, "client read %" PRIuPTR " bytes", read_buffer.length);
-      grpc_slice_buffer_reset_and_unref_internal(&read_buffer);
+      if (state.error() != absl::OkStatus()) break;
+      LOG(INFO) << "client read " << read_buffer.length << " bytes";
+      grpc_slice_buffer_reset_and_unref(&read_buffer);
     }
-    grpc_endpoint_shutdown(endpoint_,
-                           GRPC_ERROR_CREATE_FROM_STATIC_STRING("shutdown"));
-    grpc_slice_buffer_destroy_internal(&read_buffer);
+    grpc_endpoint_shutdown(endpoint_, GRPC_ERROR_CREATE("shutdown"));
+    grpc_slice_buffer_destroy(&read_buffer);
     return retval;
   }
 
@@ -181,7 +199,7 @@ class Client {
                         grpc_schedule_on_exec_ctx);
     }
 
-    ~EventState() { GRPC_ERROR_UNREF(error_); }
+    ~EventState() {}
 
     grpc_closure* closure() { return &closure_; }
 
@@ -192,16 +210,15 @@ class Client {
 
    private:
     static void OnEventDone(void* arg, grpc_error_handle error) {
-      gpr_log(GPR_INFO, "OnEventDone(): %s",
-              grpc_error_std_string(error).c_str());
+      LOG(INFO) << "OnEventDone(): " << StatusToString(error);
       EventState* state = static_cast<EventState*>(arg);
-      state->error_ = GRPC_ERROR_REF(error);
+      state->error_ = error;
       gpr_atm_rel_store(&state->done_atm_, 1);
     }
 
     grpc_closure closure_;
     gpr_atm done_atm_ = 0;
-    grpc_error_handle error_ = GRPC_ERROR_NONE;
+    grpc_error_handle error_;
   };
 
   // Returns true if done, or false if deadline exceeded.
@@ -209,15 +226,15 @@ class Client {
     while (true) {
       grpc_pollset_worker* worker = nullptr;
       gpr_mu_lock(mu_);
-      GRPC_LOG_IF_ERROR("grpc_pollset_work",
-                        grpc_pollset_work(pollset_, &worker,
-                                          ExecCtx::Get()->Now() +
-                                              Duration::Milliseconds(100)));
+      GRPC_LOG_IF_ERROR(
+          "grpc_pollset_work",
+          grpc_pollset_work(pollset_, &worker,
+                            Timestamp::Now() + Duration::Milliseconds(100)));
       // Flushes any work scheduled before or during polling.
       ExecCtx::Get()->Flush();
       gpr_mu_unlock(mu_);
       if (state != nullptr && state->done()) return true;
-      if (ExecCtx::Get()->Now() >= deadline) return false;
+      if (Timestamp::Now() >= deadline) return false;
     }
   }
 
@@ -238,21 +255,21 @@ TEST(SettingsTimeout, Basic) {
   const int server_port = grpc_pick_unused_port_or_die();
   std::string server_address_string = absl::StrCat("localhost:", server_port);
   // Start server.
-  gpr_log(GPR_INFO, "starting server on %s", server_address_string.c_str());
+  LOG(INFO) << "starting server on " << server_address_string;
   ServerThread server_thread(server_address_string.c_str());
   server_thread.Start();
   // Create client and connect to server.
-  gpr_log(GPR_INFO, "starting client connect");
+  LOG(INFO) << "starting client connect";
   Client client(server_address_string.c_str());
   client.Connect();
   // Client read.  Should fail due to server dropping connection.
-  gpr_log(GPR_INFO, "starting client read");
+  LOG(INFO) << "starting client read";
   EXPECT_TRUE(client.ReadUntilError());
   // Shut down client.
-  gpr_log(GPR_INFO, "shutting down client");
+  LOG(INFO) << "shutting down client";
   client.Shutdown();
   // Shut down server.
-  gpr_log(GPR_INFO, "shutting down server");
+  LOG(INFO) << "shutting down server";
   server_thread.Shutdown();
   // Clean up.
 }
