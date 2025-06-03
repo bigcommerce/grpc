@@ -299,8 +299,10 @@ void PrintService(const ServiceDescriptor* service,
   map<grpc::string, grpc::string> response_vars;
   for (int i = 0; i < service->method_count(); i++) {
     const Descriptor* output_type = service->method(i)->output_type();
-    response_vars["method_name"] = grpc_generator::LowercaseFirstLetter(service->method(i)->name());
-    response_vars["output_type_id"] = MessageIdentifierName(GeneratedClassName(output_type), output_type->file());
+    response_vars["method_name"] =
+        grpc_generator::LowercaseFirstLetter(service->method(i)->name());
+    response_vars["output_type_id"] = MessageIdentifierName(
+        GeneratedClassName(output_type), output_type->file());
     out->Print(response_vars, "'$method_name$' => '\\$output_type_id$',\n");
   }
   out->Outdent();
