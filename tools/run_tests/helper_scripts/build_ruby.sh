@@ -28,15 +28,33 @@ fi
 cd "$(dirname "$0")/../../.."
 
 rm -rf ./tmp
+
+SYSTEM=$(uname | cut -f 1 -d_)
+if [ "$SYSTEM" == "Darwin" ]; then
+  # work around https://github.com/rake-compiler/rake-compiler/issues/210
+  export GRPC_RUBY_TEST_ONLY_WORKAROUND_MAKE_INSTALL_BUG=true
+fi
 bundle exec rake compile
+
+# Log stuff and save a hash of the binary verify later at test runtime, in order
+# to detect corruption.
+if [ "$SYSTEM" == "Darwin" ]; then
+  ls -l src/ruby/lib/grpc/grpc_c.bundle
+  file src/ruby/lib/grpc/grpc_c.bundle
+  shasum -a 256 src/ruby/lib/grpc/grpc_c.bundle | awk '{print $1}' > src/ruby/lib/grpc/grpc_c_sha256
+else
+  ls -l src/ruby/lib/grpc/grpc_c.so
+  file src/ruby/lib/grpc/grpc_c.so
+  sha256sum src/ruby/lib/grpc/grpc_c.so | awk '{print $1}' > src/ruby/lib/grpc/grpc_c_sha256
+fi
 
 # build grpc_ruby_plugin
 mkdir -p cmake/build
 pushd cmake/build
-cmake -DgRPC_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=${CMAKE_CONFIG} ../..
+cmake -DgRPC_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=${CMAKE_CONFIG} -DCMAKE_CXX_STANDARD=17   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ../..
 make protoc grpc_ruby_plugin -j2
 popd
 
 # unbreak subsequent make builds by restoring zconf.h (previously renamed by cmake build)
 # see https://github.com/madler/zlib/issues/133
-(cd third_party/zlib; git checkout zconf.h)
+(cd third_party/zlib; git checkout zconf.h || cp zconf.h.included zconf.h)

@@ -1,9 +1,4 @@
-cmake_minimum_required(VERSION 3.4.1)
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
-
-# https://github.com/abseil/abseil-cpp/issues/626
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DABSL_NO_XRAY_ATTRIBUTES=1")
+cmake_minimum_required(VERSION 3.16)
 
 set(PROTOBUF_PROTOC_EXECUTABLE "/usr/local/bin/protoc" CACHE STRING "Protoc binary on host")
 set(gRPC_CPP_PLUGIN_EXECUTABLE "/usr/local/bin/grpc_cpp_plugin" CACHE STRING "gRPC CPP plugin binary on host")
@@ -93,7 +88,8 @@ target_link_libraries(empty_proto_lib
   log)
 
 android_protobuf_grpc_generate_cpp(
-  TEST_PROTO_SRCS TEST_PROTO_HDRS ${GRPC_SRC_DIR} ${GRPC_SRC_DIR}/src/proto/grpc/testing/test.proto)
+  TEST_PROTO_SRCS TEST_PROTO_HDRS
+  ${GRPC_SRC_DIR} ${GRPC_SRC_DIR}/src/proto/grpc/testing/test.proto)
 
 add_library(test_proto_lib
   SHARED ${TEST_PROTO_SRCS} ${TEST_PROTO_HDRS})
@@ -112,10 +108,14 @@ find_library(log-lib
 add_library(grpc-interop
   SHARED
   src/main/cpp/grpc-interop.cc
+  ${GRPC_SRC_DIR}/test/cpp/interop/backend_metrics_lb_policy.h
+  ${GRPC_SRC_DIR}/test/cpp/interop/backend_metrics_lb_policy.cc
   ${GRPC_SRC_DIR}/test/cpp/interop/interop_client.h
   ${GRPC_SRC_DIR}/test/cpp/interop/interop_client.cc
-  ${GRPC_SRC_DIR}/test/core/util/histogram.h
-  ${GRPC_SRC_DIR}/test/core/util/histogram.cc)
+  ${GRPC_SRC_DIR}/test/core/test_util/histogram.h
+  ${GRPC_SRC_DIR}/test/core/test_util/histogram.cc
+  ${GRPC_SRC_DIR}/test/core/test_util/test_lb_policies.h
+  ${GRPC_SRC_DIR}/test/core/test_util/test_lb_policies.cc)
 
 target_link_libraries(grpc-interop
   messages_proto_lib

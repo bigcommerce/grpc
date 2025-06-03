@@ -16,19 +16,25 @@
  *
  */
 
+#include <grpcpp/grpcpp.h>
+
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
 
-#include <grpc/support/log.h>
-#include <grpcpp/grpcpp.h>
+#include "absl/flags/flag.h"
+#include "absl/flags/parse.h"
+#include "absl/log/check.h"
+#include "absl/strings/str_format.h"
 
 #ifdef BAZEL_BUILD
 #include "examples/protos/helloworld.grpc.pb.h"
 #else
 #include "helloworld.grpc.pb.h"
 #endif
+
+ABSL_FLAG(uint16_t, port, 50051, "Server port for the service");
 
 using grpc::Server;
 using grpc::ServerAsyncResponseWriter;
@@ -49,8 +55,8 @@ class ServerImpl final {
   }
 
   // There is no shutdown handling in this code.
-  void Run() {
-    std::string server_address("0.0.0.0:50051");
+  void Run(uint16_t port) {
+    std::string server_address = absl::StrFormat("0.0.0.0:%d", port);
 
     ServerBuilder builder;
     // Listen on the given address without any authentication mechanism.
@@ -70,7 +76,7 @@ class ServerImpl final {
   }
 
  private:
-  // Class encompasing the state and logic needed to serve a request.
+  // Class encompassing the state and logic needed to serve a request.
   class CallData {
    public:
     // Take in the "service" instance (in this case representing an asynchronous
@@ -110,7 +116,7 @@ class ServerImpl final {
         status_ = FINISH;
         responder_.Finish(reply_, Status::OK, this);
       } else {
-        GPR_ASSERT(status_ == FINISH);
+        CHECK_EQ(status_, FINISH);
         // Once in the FINISH state, deallocate ourselves (CallData).
         delete this;
       }
@@ -152,8 +158,8 @@ class ServerImpl final {
       // memory address of a CallData instance.
       // The return value of Next should always be checked. This return value
       // tells us whether there is any kind of event or cq_ is shutting down.
-      GPR_ASSERT(cq_->Next(&tag, &ok));
-      GPR_ASSERT(ok);
+      CHECK(cq_->Next(&tag, &ok));
+      CHECK(ok);
       static_cast<CallData*>(tag)->Proceed();
     }
   }
@@ -164,8 +170,9 @@ class ServerImpl final {
 };
 
 int main(int argc, char** argv) {
+  absl::ParseCommandLine(argc, argv);
   ServerImpl server;
-  server.Run();
+  server.Run(absl::GetFlag(FLAGS_port));
 
   return 0;
 }

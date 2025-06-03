@@ -1,21 +1,22 @@
-/*
- *
- * Copyright 2019 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2019 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
+#include <grpc/grpc.h>
 #include <spawn.h>
 
 #include <sstream>
@@ -23,20 +24,18 @@
 #include <thread>
 #include <vector>
 
-#include <gtest/gtest.h>
-
+#include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/time/time.h"
-
-#include <grpc/grpc.h>
-#include <grpc/support/log.h>
-
-#include "src/core/lib/gprpp/sync.h"
+#include "gtest/gtest.h"
 #include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/iomgr/timer.h"
 #include "src/core/lib/iomgr/timer_manager.h"
-#include "test/core/util/test_config.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/sync.h"
+#include "test/core/test_util/test_config.h"
 
 extern char** environ;
 
@@ -90,14 +89,13 @@ INSTANTIATE_TEST_SUITE_P(TimeJump, TimeJumpTest,
 TEST_P(TimeJumpTest, TimerRunning) {
   grpc_core::ExecCtx exec_ctx;
   grpc_timer timer;
-  grpc_timer_init(
-      &timer,
-      grpc_core::ExecCtx::Get()->Now() + grpc_core::Duration::Seconds(3),
-      GRPC_CLOSURE_CREATE(
-          [](void*, grpc_error_handle error) {
-            GPR_ASSERT(error == GRPC_ERROR_CANCELLED);
-          },
-          nullptr, grpc_schedule_on_exec_ctx));
+  grpc_timer_init(&timer,
+                  grpc_core::Timestamp::Now() + grpc_core::Duration::Seconds(3),
+                  GRPC_CLOSURE_CREATE(
+                      [](void*, grpc_error_handle error) {
+                        CHECK(error == absl::CancelledError());
+                      },
+                      nullptr, grpc_schedule_on_exec_ctx));
   gpr_sleep_until(grpc_timeout_milliseconds_to_deadline(100));
   std::ostringstream cmd;
   cmd << "sudo date `date -v" << GetParam() << " \"+%m%d%H%M%y\"`";
@@ -105,8 +103,8 @@ TEST_P(TimeJumpTest, TimerRunning) {
   gpr_sleep_until(grpc_timeout_milliseconds_to_deadline(kWaitTimeMs));
   // We expect 1 wakeup/sec when there are not timer expiries
   int64_t wakeups = grpc_timer_manager_get_wakeups_testonly();
-  gpr_log(GPR_DEBUG, "wakeups: %" PRId64 "", wakeups);
-  GPR_ASSERT(wakeups <= 3);
+  VLOG(2) << "wakeups: " << wakeups;
+  CHECK_LE(wakeups, 3);
   grpc_timer_cancel(&timer);
 }
 
@@ -125,11 +123,10 @@ TEST_P(TimeJumpTest, TimedWait) {
     bool timedout = cond.WaitWithTimeout(&mu, absl::Milliseconds(kWaitTimeMs));
     gpr_timespec after = gpr_now(GPR_CLOCK_MONOTONIC);
     int32_t elapsed_ms = gpr_time_to_millis(gpr_time_sub(after, before));
-    gpr_log(GPR_DEBUG, "After wait, timedout = %d elapsed_ms = %d", timedout,
-            elapsed_ms);
-    GPR_ASSERT(1 == timedout);
-    GPR_ASSERT(1 ==
-               gpr_time_similar(gpr_time_sub(after, before),
+    VLOG(2) << "After wait, timedout = " << timedout
+            << " elapsed_ms = " << elapsed_ms;
+    CHECK_EQ(timedout, 1);
+    CHECK(1 == gpr_time_similar(gpr_time_sub(after, before),
                                 gpr_time_from_millis(kWaitTimeMs, GPR_TIMESPAN),
                                 gpr_time_from_millis(50, GPR_TIMESPAN)));
 
@@ -137,8 +134,8 @@ TEST_P(TimeJumpTest, TimedWait) {
   }
   // We expect 1 wakeup/sec when there are not timer expiries
   int64_t wakeups = grpc_timer_manager_get_wakeups_testonly();
-  gpr_log(GPR_DEBUG, "wakeups: %" PRId64 "", wakeups);
-  GPR_ASSERT(wakeups <= 3);
+  VLOG(2) << "wakeups: " << wakeups;
+  CHECK_LE(wakeups, 3);
 }
 
 int main(int argc, char** argv) {

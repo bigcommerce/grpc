@@ -16,61 +16,97 @@
 //
 //
 
-#ifndef GRPC_INTERNAL_CPP_EXT_FILTERS_OPEN_CENSUS_CALL_TRACER_H
-#define GRPC_INTERNAL_CPP_EXT_FILTERS_OPEN_CENSUS_CALL_TRACER_H
+#ifndef GRPC_SRC_CPP_EXT_FILTERS_CENSUS_OPEN_CENSUS_CALL_TRACER_H
+#define GRPC_SRC_CPP_EXT_FILTERS_CENSUS_OPEN_CENSUS_CALL_TRACER_H
 
 #include <grpc/support/port_platform.h>
-
+#include <grpc/support/time.h>
+#include <grpcpp/opencensus.h>
 #include <stdint.h>
+
+#include <atomic>
+#include <memory>
+#include <string>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
-
-#include <grpc/impl/codegen/gpr_types.h>
-#include <grpc/support/atm.h>
-
-#include "src/core/lib/channel/call_tracer.h"
-#include "src/core/lib/channel/channel_stack.h"
-#include "src/core/lib/channel/context.h"
-#include "src/core/lib/gprpp/sync.h"
+#include "opencensus/trace/span.h"
+#include "opencensus/trace/span_context.h"
+#include "opencensus/trace/span_id.h"
+#include "opencensus/trace/trace_id.h"
+#include "src/core/call/metadata_batch.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/resource_quota/arena.h"
 #include "src/core/lib/slice/slice.h"
 #include "src/core/lib/slice/slice_buffer.h"
-#include "src/core/lib/transport/metadata_batch.h"
 #include "src/core/lib/transport/transport.h"
-#include "src/cpp/ext/filters/census/context.h"
+#include "src/core/telemetry/call_tracer.h"
+#include "src/core/telemetry/tcp_tracer.h"
+#include "src/core/util/sync.h"
+
+// TODO(yashykt): This might not be the right place for this channel arg, but we
+// don't have a better place for this right now.
+
+// EXPERIMENTAL. If zero, disables observability tracing and observability
+// logging (not yet implemented) on the client channel, defaults to true. Note
+// that this does not impact metrics/stats collection. This channel arg is
+// intended as a way to avoid cyclic execution of observability logging and
+// trace especially when the sampling rate of RPCs is very high which would
+// generate a lot of data.
+//
+#define GRPC_ARG_ENABLE_OBSERVABILITY "grpc.experimental.enable_observability"
 
 namespace grpc {
+namespace internal {
 
-class OpenCensusCallTracer : public grpc_core::CallTracer {
+class OpenCensusCallTracer : public grpc_core::ClientCallTracer {
  public:
   class OpenCensusCallAttemptTracer : public CallAttemptTracer {
    public:
     OpenCensusCallAttemptTracer(OpenCensusCallTracer* parent,
                                 uint64_t attempt_num, bool is_transparent_retry,
                                 bool arena_allocated);
-    void RecordSendInitialMetadata(grpc_metadata_batch* send_initial_metadata,
-                                   uint32_t /*flags*/) override;
-    void RecordOnDoneSendInitialMetadata(gpr_atm* /*peer_string*/) override {}
+
+    std::string TraceId() override {
+      return context_.Context().trace_id().ToHex();
+    }
+
+    std::string SpanId() override {
+      return context_.Context().span_id().ToHex();
+    }
+
+    bool IsSampled() override { return context_.Span().IsSampled(); }
+
+    void RecordSendInitialMetadata(
+        grpc_metadata_batch* send_initial_metadata) override;
     void RecordSendTrailingMetadata(
         grpc_metadata_batch* /*send_trailing_metadata*/) override {}
-    void RecordSendMessage(
-        const grpc_core::SliceBuffer& /*send_message*/) override;
+    void RecordSendMessage(const grpc_core::Message& send_message) override;
+    void RecordSendCompressedMessage(
+        const grpc_core::Message& send_compressed_message) override;
     void RecordReceivedInitialMetadata(
-        grpc_metadata_batch* /*recv_initial_metadata*/,
-        uint32_t /*flags*/) override {}
-    void RecordReceivedMessage(
-        const grpc_core::SliceBuffer& /*recv_message*/) override;
+        grpc_metadata_batch* /*recv_initial_metadata*/) override {}
+    void RecordReceivedMessage(const grpc_core::Message& recv_message) override;
+    void RecordReceivedDecompressedMessage(
+        const grpc_core::Message& recv_decompressed_message) override;
     void RecordReceivedTrailingMetadata(
         absl::Status status, grpc_metadata_batch* recv_trailing_metadata,
         const grpc_transport_stream_stats* transport_stream_stats) override;
+    void RecordIncomingBytes(
+        const TransportByteSize& transport_byte_size) override;
+    void RecordOutgoingBytes(
+        const TransportByteSize& transport_byte_size) override;
     void RecordCancel(grpc_error_handle cancel_error) override;
-    void RecordEnd(const gpr_timespec& /*latency*/) override;
+    void RecordEnd() override;
+    void RecordAnnotation(absl::string_view annotation) override;
+    void RecordAnnotation(const Annotation& annotation) override;
+    std::shared_ptr<grpc_core::TcpCallTracer> StartNewTcpTrace() override;
+    void SetOptionalLabel(OptionalLabelKey,
+                          grpc_core::RefCountedStringValue) override {}
 
-    CensusContext* context() { return &context_; }
+    experimental::CensusContext* context() { return &context_; }
 
    private:
     // Maximum size of trace context is sent on the wire.
@@ -79,7 +115,7 @@ class OpenCensusCallTracer : public grpc_core::CallTracer {
     static constexpr uint32_t kMaxTagsLen = 2048;
     OpenCensusCallTracer* parent_;
     const bool arena_allocated_;
-    CensusContext context_;
+    experimental::CensusContext context_;
     // Start time (for measuring latency).
     absl::Time start_time_;
     // Number of messages in this RPC.
@@ -87,22 +123,45 @@ class OpenCensusCallTracer : public grpc_core::CallTracer {
     uint64_t sent_message_count_ = 0;
     // End status code
     absl::StatusCode status_code_;
+    // TODO(roth, ctiller): Won't need atomic here once chttp2 is migrated
+    // to promises, after which we can ensure that the transport invokes
+    // the RecordIncomingBytes() and RecordOutgoingBytes() methods inside
+    // the call's party.
+    std::atomic<uint64_t> incoming_bytes_{0};
+    std::atomic<uint64_t> outgoing_bytes_{0};
   };
 
-  explicit OpenCensusCallTracer(const grpc_call_element_args* args);
+  explicit OpenCensusCallTracer(grpc_core::Slice path, grpc_core::Arena* arena,
+                                bool tracing_enabled);
   ~OpenCensusCallTracer() override;
+
+  std::string TraceId() override {
+    return context_.Context().trace_id().ToHex();
+  }
+
+  std::string SpanId() override { return context_.Context().span_id().ToHex(); }
+
+  bool IsSampled() override { return context_.Span().IsSampled(); }
 
   void GenerateContext();
   OpenCensusCallAttemptTracer* StartNewAttempt(
       bool is_transparent_retry) override;
+  void RecordAnnotation(absl::string_view annotation) override;
+  void RecordAnnotation(const Annotation& annotation) override;
+
+  // APIs to record API call latency
+  void RecordApiLatency(absl::Duration api_latency,
+                        absl::StatusCode status_code_);
 
  private:
-  const grpc_call_context_element* call_context_;
+  experimental::CensusContext CreateCensusContextForCallAttempt();
+
   // Client method.
   grpc_core::Slice path_;
   absl::string_view method_;
-  CensusContext context_;
+  experimental::CensusContext context_;
   grpc_core::Arena* arena_;
+  const bool tracing_enabled_;
   grpc_core::Mutex mu_;
   // Non-transparent attempts per call
   uint64_t retries_ ABSL_GUARDED_BY(&mu_) = 0;
@@ -114,6 +173,7 @@ class OpenCensusCallTracer : public grpc_core::CallTracer {
   uint64_t num_active_rpcs_ ABSL_GUARDED_BY(&mu_) = 0;
 };
 
-};  // namespace grpc
+}  // namespace internal
+}  // namespace grpc
 
-#endif  // GRPC_INTERNAL_CPP_EXT_FILTERS_OPEN_CENSUS_CALL_TRACER_H
+#endif  // GRPC_SRC_CPP_EXT_FILTERS_CENSUS_OPEN_CENSUS_CALL_TRACER_H

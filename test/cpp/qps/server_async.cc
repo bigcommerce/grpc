@@ -1,31 +1,23 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <algorithm>
-#include <forward_list>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <thread>
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
 #include <grpcpp/generic/async_generic_service.h>
 #include <grpcpp/resource_quota.h>
 #include <grpcpp/security/server_credentials.h>
@@ -34,10 +26,19 @@
 #include <grpcpp/server_context.h>
 #include <grpcpp/support/config.h>
 
-#include "src/core/lib/gprpp/host_port.h"
+#include <algorithm>
+#include <forward_list>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <thread>
+
+#include "absl/log/log.h"
 #include "src/core/lib/surface/completion_queue.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/host_port.h"
 #include "src/proto/grpc/testing/benchmark_service.grpc.pb.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/test_config.h"
 #include "test/cpp/qps/qps_server_builder.h"
 #include "test/cpp/qps/server.h"
 
@@ -81,9 +82,8 @@ class AsyncQpsServerTest final : public grpc::testing::Server {
     // Negative port number means inproc server, so no listen port needed
     if (port_num >= 0) {
       std::string server_address = grpc_core::JoinHostPort("::", port_num);
-      builder->AddListeningPort(server_address.c_str(),
-                                Server::CreateServerCredentials(config),
-                                &port_num);
+      builder->AddListeningPort(
+          server_address, Server::CreateServerCredentials(config), &port_num);
     }
 
     register_service(builder.get(), &async_service_);
@@ -91,11 +91,9 @@ class AsyncQpsServerTest final : public grpc::testing::Server {
     int num_threads = config.async_server_threads();
     if (num_threads <= 0) {  // dynamic sizing
       num_threads = std::min(64, cores());
-      gpr_log(GPR_INFO,
-              "Sizing async server to %d threads. Defaults to number of cores "
-              "in machine or 64 threads if machine has more than 64 cores to "
-              "avoid OOMs.",
-              num_threads);
+      LOG(INFO) << "Sizing async server to " << num_threads
+                << " threads. Defaults to number of cores in machine or 64 "
+                   "threads if machine has more than 64 cores to avoid OOMs.";
     }
 
     int tpc = std::max(1, config.threads_per_cq());  // 1 if unspecified
@@ -111,9 +109,9 @@ class AsyncQpsServerTest final : public grpc::testing::Server {
 
     server_ = builder->BuildAndStart();
     if (server_ == nullptr) {
-      gpr_log(GPR_ERROR, "Server: Fail to BuildAndStart(port=%d)", port_num);
+      LOG(ERROR) << "Server: Fail to BuildAndStart(port=" << port_num << ")";
     } else {
-      gpr_log(GPR_INFO, "Server: BuildAndStart(port=%d)", port_num);
+      LOG(INFO) << "Server: BuildAndStart(port=" << port_num << ")";
     }
 
     auto process_rpc_bound =
@@ -239,7 +237,7 @@ class AsyncQpsServerTest final : public grpc::testing::Server {
     ServerRpcContext() {}
     void lock() { mu_.lock(); }
     void unlock() { mu_.unlock(); }
-    virtual ~ServerRpcContext(){};
+    virtual ~ServerRpcContext() {};
     virtual bool RunNextState(bool) = 0;  // next state, return false if done
     virtual void Reset() = 0;             // start this back at a clean state
    private:

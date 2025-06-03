@@ -1,34 +1,32 @@
-/*
- *
- * Copyright 2019 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2019 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
+#include <grpc/grpc_security_constants.h>
+#include <grpcpp/security/alts_context.h>
 #include <stddef.h>
 
 #include <map>
 #include <string>
 
-#include "upb/upb.h"
-
-#include <grpc/grpc_security_constants.h>
-#include <grpcpp/security/alts_context.h>
-#include <grpcpp/support/config.h>
-
 #include "src/proto/grpc/gcp/altscontext.upb.h"
 #include "src/proto/grpc/gcp/transport_security_common.upb.h"
+#include "upb/base/string_view.h"
+#include "upb/message/map.h"
 
 namespace grpc {
 namespace experimental {
@@ -88,19 +86,15 @@ AltsContext::AltsContext(const grpc_gcp_AltsContext* ctx) {
     security_level_ = static_cast<grpc_security_level>(
         grpc_gcp_AltsContext_security_level(ctx));
   }
-  if (grpc_gcp_AltsContext_has_peer_attributes(ctx)) {
+  if (grpc_gcp_AltsContext_peer_attributes_size(ctx) != 0) {
+    grpc_gcp_AltsContext* ctx_upb = (grpc_gcp_AltsContext*)ctx;
     size_t iter = kUpb_Map_Begin;
-    const grpc_gcp_AltsContext_PeerAttributesEntry* peer_attributes_entry =
-        grpc_gcp_AltsContext_peer_attributes_next(ctx, &iter);
-    while (peer_attributes_entry != nullptr) {
-      upb_StringView key =
-          grpc_gcp_AltsContext_PeerAttributesEntry_key(peer_attributes_entry);
-      upb_StringView val =
-          grpc_gcp_AltsContext_PeerAttributesEntry_value(peer_attributes_entry);
+    upb_StringView key;
+    upb_StringView val;
+    while (
+        grpc_gcp_AltsContext_peer_attributes_next(ctx_upb, &key, &val, &iter)) {
       peer_attributes_map_[std::string(key.data, key.size)] =
           std::string(val.data, val.size);
-      peer_attributes_entry =
-          grpc_gcp_AltsContext_peer_attributes_next(ctx, &iter);
     }
   }
 }

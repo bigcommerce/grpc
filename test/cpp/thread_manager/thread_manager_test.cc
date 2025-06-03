@@ -1,24 +1,25 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *is % allowed in string
- */
-
-#include <grpc/support/port_platform.h>
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// is % allowed in string
+//
 
 #include "src/cpp/thread_manager/thread_manager.h"
+
+#include <grpc/support/port_platform.h>
+#include <grpcpp/grpcpp.h>
 
 #include <atomic>
 #include <chrono>
@@ -26,12 +27,10 @@
 #include <memory>
 #include <thread>
 
-#include <gtest/gtest.h>
-
-#include <grpc/support/log.h>
-#include <grpcpp/grpcpp.h>
-
-#include "test/core/util/test_config.h"
+#include "absl/log/log.h"
+#include "gtest/gtest.h"
+#include "src/core/util/crash.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc {
 namespace {
@@ -163,7 +162,7 @@ TEST_P(ThreadManagerTest, TestPollAndWork) {
   for (auto& tm : thread_manager_) {
     // Verify that The number of times DoWork() was called is equal to the
     // number of times WORK_FOUND was returned
-    gpr_log(GPR_DEBUG, "DoWork() called %d times", tm->num_do_work());
+    VLOG(2) << "DoWork() called " << tm->num_do_work() << " times";
     EXPECT_GE(tm->num_poll_for_work(), GetParam().max_poll_calls);
     EXPECT_EQ(tm->num_do_work(), tm->num_work_found());
   }

@@ -10,6 +10,8 @@ load("//bazel:grpc_extra_deps.bzl", "grpc_extra_deps")
 
 grpc_extra_deps()
 
+# RBE
+
 load("@bazel_toolchains//rules/exec_properties:exec_properties.bzl", "create_rbe_exec_properties_dict", "custom_exec_properties")
 
 custom_exec_properties(
@@ -24,67 +26,92 @@ custom_exec_properties(
     },
 )
 
-load("@bazel_toolchains//rules:rbe_repo.bzl", "rbe_autoconfig")
-
-# Create toolchain configuration for remote execution.
-rbe_autoconfig(
-    name = "rbe_default",
-    exec_properties = create_rbe_exec_properties_dict(
-        docker_add_capabilities = "SYS_PTRACE",
-        docker_privileged = True,
-        labels = {
-            "os": "ubuntu",
-            "machine_size": "small",
-        },
-        os_family = "Linux",
-    ),
-    # use exec_properties instead of deprecated remote_execution_properties
-    use_legacy_platform_definition = False,
-)
-
-load("@bazel_toolchains//rules:environments.bzl", "clang_env")
-load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
-    name = "build_bazel_rules_android",
-    sha256 = "cd06d15dd8bb59926e4d65f9003bfc20f9da4b2519985c27e190cddc8b7a7806",
-    strip_prefix = "rules_android-0.1.1",
-    urls = ["https://github.com/bazelbuild/rules_android/archive/v0.1.1.zip"],
+    name = "platforms",
+    sha256 = "8150406605389ececb6da07cbcb509d5637a3ab9a24bc69b1101531367d89d74",
+    urls = ["https://github.com/bazelbuild/platforms/releases/download/0.0.8/platforms-0.0.8.tar.gz"],
 )
-
-load("//third_party/android:android_configure.bzl", "android_configure")
-
-android_configure(name = "local_config_android")
-
-load("@local_config_android//:android_configure.bzl", "android_workspace")
-
-android_workspace()
 
 # Prevents bazel's '...' expansion from including the following folder.
-# This is required because the BUILD file in the following folder
-# will trigger bazel failure when Android SDK is not configured.
-# The targets in the following folder need to be included in APK and will
-# be invoked by binder transport implementation through JNI.
+# This is required to avoid triggering "Unable to find package for @rules_fuzzing//fuzzing:cc_defs.bzl"
+# error.
 local_repository(
-    name = "binder_transport_android_helper",
-    path = "./src/core/ext/transport/binder/java",
+    name = "ignore_third_party_utf8_range_subtree",
+    path = "third_party/utf8_range",
 )
 
-# Create msan toolchain configuration for remote execution.
-rbe_autoconfig(
-    name = "rbe_msan",
-    env = dicts.add(
-        clang_env(),
-        {
-            "BAZEL_LINKOPTS": "-lc++:-lc++abi:-lm",
-        },
-    ),
-)
+load("@rules_python//python:pip.bzl", "pip_parse")
 
-load("@io_bazel_rules_python//python:pip.bzl", "pip_install")
-
-pip_install(
+pip_parse(
     name = "grpc_python_dependencies",
-    requirements = "@com_github_grpc_grpc//:requirements.bazel.txt",
+    requirements_lock = "@com_github_grpc_grpc//:requirements.bazel.lock",
+)
+
+load("@grpc_python_dependencies//:requirements.bzl", "install_deps")
+
+install_deps()
+
+load("@com_google_protobuf//python/dist:system_python.bzl", "system_python")
+
+system_python(
+    name = "system_python",
+    minimum_python_version = "3.8",
+)
+
+load("@system_python//:pip.bzl", system_pip_parse = "pip_parse")
+
+system_pip_parse(
+    name = "pip_deps",
+    requirements = "@com_google_protobuf//python:requirements.txt",
+    requirements_overrides = {
+        "3.11": "@com_google_protobuf//python:requirements_311.txt",
+    },
+)
+
+http_archive(
+    name = "build_bazel_rules_swift",
+    sha256 = "bf2861de6bf75115288468f340b0c4609cc99cc1ccc7668f0f71adfd853eedb3",
+    url = "https://github.com/bazelbuild/rules_swift/releases/download/1.7.1/rules_swift.1.7.1.tar.gz",
+)
+
+load(
+    "@build_bazel_apple_support//lib:repositories.bzl",
+    "apple_support_dependencies",
+)
+
+apple_support_dependencies()
+
+load(
+    "@build_bazel_rules_swift//swift:repositories.bzl",
+    "swift_rules_dependencies",
+)
+
+swift_rules_dependencies()
+
+# This loads the libpfm transitive dependency.
+# See https://github.com/google/benchmark/pull/1520
+load("@com_github_google_benchmark//:bazel/benchmark_deps.bzl", "benchmark_deps")
+
+benchmark_deps()
+
+# This is a transitive dependency from google_cloud_cpp
+bind(
+    name = "cares",
+    actual = "@com_github_cares_cares//:ares",
+)
+
+load("@io_opentelemetry_cpp//bazel:repository.bzl", "opentelemetry_cpp_deps")
+
+opentelemetry_cpp_deps()
+
+load("@io_opentelemetry_cpp//bazel:extra_deps.bzl", "opentelemetry_extra_deps")
+
+opentelemetry_extra_deps()
+
+# Transitive dependency of opentelemetry_extra_deps()
+bind(
+    name = "madler_zlib",
+    actual = "@zlib//:zlib",
 )

@@ -1,27 +1,33 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <grpc/support/port_platform.h>
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "src/cpp/server/channelz/channelz_service.h"
 
 #include <grpc/support/alloc.h>
+#include <grpc/support/port_platform.h>
 #include <grpcpp/impl/codegen/config_protobuf.h>
+
+#include <memory>
+
+#include "absl/log/log.h"
+
+// IWYU pragma: no_include "google/protobuf/json/json.h"
+// IWYU pragma: no_include "google/protobuf/util/json_util.h"
 
 // IWYU pragma: no_include <google/protobuf/util/json_util.h>
 
@@ -33,7 +39,14 @@ grpc::protobuf::util::Status ParseJson(const char* json_str,
                                        grpc::protobuf::Message* message) {
   grpc::protobuf::json::JsonParseOptions options;
   options.case_insensitive_enum_parsing = true;
-  return grpc::protobuf::json::JsonStringToMessage(json_str, message, options);
+  auto r =
+      grpc::protobuf::json::JsonStringToMessage(json_str, message, options);
+  if (!r.ok()) {
+    LOG(ERROR) << "channelz json parse failed: error=" << r.ToString()
+               << " json:\n"
+               << json_str;
+  }
+  return r;
 }
 
 }  // namespace

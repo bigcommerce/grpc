@@ -16,6 +16,7 @@
 # Builds Dart interop server and client in a base image.
 set -ex
 
+git config --global --add safe.directory /var/local/jenkins/grpc-dart/.git
 mkdir -p /var/local/git
 git clone /var/local/jenkins/grpc-dart /var/local/git/grpc-dart
 
@@ -24,4 +25,4 @@ cp -r /var/local/jenkins/service_account $HOME || true
 
 cd /var/local/git/grpc-dart/interop
 # De-flake attempt: run the cmd one more time in case of transient failure
-/usr/lib/dart/bin/pub get --verbose || /usr/lib/dart/bin/pub get --verbose
+/usr/lib/dart/bin/dart pub get --verbose || /usr/lib/dart/bin/dart pub get --verbose

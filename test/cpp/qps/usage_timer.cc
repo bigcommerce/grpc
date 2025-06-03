@@ -1,35 +1,37 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "test/cpp/qps/usage_timer.h"
+
+#include <grpc/support/time.h>
 
 #include <fstream>
 #include <sstream>
 #include <string>
 
-#include <grpc/support/log.h>
-#include <grpc/support/time.h>
+#include "absl/log/log.h"
+#include "src/core/util/crash.h"
 #ifdef __linux__
 #include <sys/resource.h>
 #include <sys/time.h>
 
 static double time_double(struct timeval* tv) {
-  return tv->tv_sec + 1e-6 * tv->tv_usec;
+  return tv->tv_sec + (1e-6 * tv->tv_usec);
 }
 #endif
 
@@ -37,7 +39,7 @@ UsageTimer::UsageTimer() : start_(Sample()) {}
 
 double UsageTimer::Now() {
   auto ts = gpr_now(GPR_CLOCK_REALTIME);
-  return ts.tv_sec + 1e-9 * ts.tv_nsec;
+  return ts.tv_sec + (1e-9 * ts.tv_nsec);
 }
 
 static void get_resource_usage(double* utime, double* stime) {
@@ -72,7 +74,7 @@ static void get_cpu_usage(unsigned long long* total_cpu_time,
   // Use the parameters to avoid unused-parameter warning
   (void)total_cpu_time;
   (void)idle_cpu_time;
-  gpr_log(GPR_INFO, "get_cpu_usage(): Non-linux platform is not supported.");
+  LOG(INFO) << "get_cpu_usage(): Non-linux platform is not supported.";
 #endif
 }
 

@@ -20,7 +20,7 @@
 /**
  * @group persistent_list_bound_tests
  */
-class PersistentListTest extends \PHPUnit\Framework\TestCase
+class PersistentChannelTest extends \PHPUnit\Framework\TestCase
 {
   public function setUp(): void
   {
@@ -50,14 +50,6 @@ class PersistentListTest extends \PHPUnit\Framework\TestCase
       $this->assertTrue($state == GRPC\CHANNEL_CONNECTING ||
       $state == GRPC\CHANNEL_TRANSIENT_FAILURE);
   }
-
-  public function testInitHelper()
-  {
-      // PersistentList is not empty at the beginning of the tests
-      // because phpunit will cache the channels created by other test
-      // files.
-  }
-
 
   public function testChannelNotPersist()
   {

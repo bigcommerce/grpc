@@ -24,7 +24,6 @@ _TIMEOUT_FOR_SEGFAULT = datetime.timedelta(seconds=10)
 
 
 class GrpcShutdownTest(unittest.TestCase):
-
     def test_channel_close_with_connectivity_watcher(self):
         """Originated by https://github.com/grpc/grpc/issues/20299.
 
@@ -34,11 +33,13 @@ class GrpcShutdownTest(unittest.TestCase):
         connection_failed = threading.Event()
 
         def on_state_change(state):
-            if state in (grpc.ChannelConnectivity.TRANSIENT_FAILURE,
-                         grpc.ChannelConnectivity.SHUTDOWN):
+            if state in (
+                grpc.ChannelConnectivity.TRANSIENT_FAILURE,
+                grpc.ChannelConnectivity.SHUTDOWN,
+            ):
                 connection_failed.set()
 
-        # Connects to an void address, and subscribes state changes
+        # Connects to a void address, and subscribes state changes
         channel = grpc.insecure_channel("0.1.1.1:12345")
         channel.subscribe(on_state_change, True)
 
@@ -50,5 +51,5 @@ class GrpcShutdownTest(unittest.TestCase):
                 channel.close()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main(verbosity=2)

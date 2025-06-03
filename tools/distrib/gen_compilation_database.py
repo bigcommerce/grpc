@@ -39,21 +39,31 @@ def generateCompilationDatabase(args):
         "--remote_download_outputs=all",
     ]
 
-    subprocess.check_call(["bazel", "build"] + bazel_options + [
-        "--aspects=@bazel_compdb//:aspects.bzl%compilation_database_aspect",
-        "--output_groups=compdb_files,header_files"
-    ] + args.bazel_targets)
+    subprocess.check_call(
+        ["bazel", "build"]
+        + bazel_options
+        + [
+            "--aspects=@bazel_compdb//:aspects.bzl%compilation_database_aspect",
+            "--output_groups=compdb_files,header_files",
+        ]
+        + args.bazel_targets
+    )
 
-    execroot = subprocess.check_output(["bazel", "info", "execution_root"] +
-                                       bazel_options).decode().strip()
+    execroot = (
+        subprocess.check_output(
+            ["bazel", "info", "execution_root"] + bazel_options
+        )
+        .decode()
+        .strip()
+    )
 
     compdb = []
     for compdb_file in Path(execroot).glob("**/*.compile_commands.json"):
         compdb.extend(
             json.loads(
-                "[" +
-                compdb_file.read_text().replace("__EXEC_ROOT__", execroot) +
-                "]"))
+                compdb_file.read_text().replace("__EXEC_ROOT__", execroot)
+            )
+        )
 
     if args.dedup_targets:
         compdb_map = {target["file"]: target for target in compdb}
@@ -106,8 +116,8 @@ def modifyCompileCommand(target, args):
         options += " -Wno-pragma-once-outside-header -Wno-unused-const-variable"
         options += " -Wno-unused-function"
         if not target["file"].startswith("external/"):
-            # *.h file is treated as C header by default while our headers files are all C++14.
-            options = "-x c++ -std=c++14 -fexceptions " + options
+            # *.h file is treated as C header by default while our headers files are all C++17.
+            options = "-x c++ -std=c++17 -fexceptions " + options
 
     target["command"] = " ".join([cc, options])
     return target
@@ -126,13 +136,14 @@ def fixCompilationDatabase(args, db):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Generate JSON compilation database')
-    parser.add_argument('--include_external', action='store_true')
-    parser.add_argument('--include_genfiles', action='store_true')
-    parser.add_argument('--include_headers', action='store_true')
-    parser.add_argument('--vscode', action='store_true')
-    parser.add_argument('--ignore_system_headers', action='store_true')
-    parser.add_argument('--dedup_targets', action='store_true')
-    parser.add_argument('bazel_targets', nargs='*', default=["//..."])
+        description="Generate JSON compilation database"
+    )
+    parser.add_argument("--include_external", action="store_true")
+    parser.add_argument("--include_genfiles", action="store_true")
+    parser.add_argument("--include_headers", action="store_true")
+    parser.add_argument("--vscode", action="store_true")
+    parser.add_argument("--ignore_system_headers", action="store_true")
+    parser.add_argument("--dedup_targets", action="store_true")
+    parser.add_argument("bazel_targets", nargs="*", default=["//..."])
     args = parser.parse_args()
     fixCompilationDatabase(args, generateCompilationDatabase(args))

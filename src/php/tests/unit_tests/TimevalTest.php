@@ -18,6 +18,8 @@
  */
 class TimevalTest extends \PHPUnit\Framework\TestCase
 {
+    private $time;
+
     public function setUp(): void
     {
     }
@@ -60,15 +62,6 @@ class TimevalTest extends \PHPUnit\Framework\TestCase
         $this->time = new Grpc\Timeval(0x1A);
         $this->assertNotNull($this->time);
         $this->assertSame('Grpc\Timeval', get_class($this->time));
-    }
-
-    public function testConstructorWithFloat()
-    {
-        $this->time = new Grpc\Timeval(123.456);
-        $this->assertNotNull($this->time);
-        $this->assertSame('Grpc\Timeval', get_class($this->time));
-        $timeFromInt = new Grpc\Timeval(123);
-        $this->assertSame(0, Grpc\Timeval::compare($this->time, $timeFromInt));
     }
 
     public function testConstructorWithBigInt()

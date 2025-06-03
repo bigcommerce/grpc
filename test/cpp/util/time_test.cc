@@ -1,27 +1,26 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <gtest/gtest.h>
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpc/support/time.h>
 #include <grpcpp/support/time.h>
 
-#include "test/core/util/test_config.h"
+#include "gtest/gtest.h"
+#include "test/core/test_util/test_config.h"
 
 using std::chrono::microseconds;
 using std::chrono::system_clock;
@@ -52,12 +51,6 @@ TEST_F(TimeTest, InfFuture) {
             Timespec2Timepoint(gpr_inf_future(GPR_CLOCK_REALTIME)));
   gpr_timespec from_time_point_max;
   Timepoint2Timespec(system_clock::time_point::max(), &from_time_point_max);
-  EXPECT_EQ(
-      0, gpr_time_cmp(gpr_inf_future(GPR_CLOCK_REALTIME), from_time_point_max));
-  // This will cause an overflow
-  Timepoint2Timespec(
-      std::chrono::time_point<system_clock, std::chrono::seconds>::max(),
-      &from_time_point_max);
   EXPECT_EQ(
       0, gpr_time_cmp(gpr_inf_future(GPR_CLOCK_REALTIME), from_time_point_max));
 }

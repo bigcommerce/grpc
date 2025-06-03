@@ -14,12 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@rules_proto//proto:defs.bzl", "proto_library")
 load(
     "@com_github_grpc_grpc//bazel:python_rules.bzl",
     "py_grpc_library",
-    "py_proto_library",
 )
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//:python_rules_test.bzl", "python_rules_test_suite")
 
 package(
     default_testonly = 1,
@@ -83,7 +85,7 @@ py_test(
 proto_library(
     name = "helloworld_moved_proto",
     srcs = ["helloworld.proto"],
-    import_prefix = "google/cloud",
+    import_prefix = "foo/bar",
     strip_import_prefix = "",
     deps = [
         ":hello_dep_proto",
@@ -144,6 +146,16 @@ py_test(
     ],
 )
 
+py_test(
+    name = "import_from_grpcio_reflection_test",
+    srcs = ["import_from_grpcio_reflection.py"],
+    main = "import_from_grpcio_reflection.py",
+    python_version = "PY3",
+    deps = [
+        "@com_github_grpc_grpc//src/python/grpcio_reflection/grpc_reflection/v1alpha:grpc_reflection",
+    ],
+)
+
 # Test that a py_proto_library can be successfully imported without requiring
 # explicit dependencies on unused dependencies of the generated code.
 py_test(
@@ -153,5 +165,34 @@ py_test(
     python_version = "PY3",
     deps = [
         ":helloworld_py_pb2",
+    ],
+)
+
+python_rules_test_suite(
+    name = "python_rules_test",
+)
+
+# Test that grpc_library attribute replaces grpcio dependency on
+# py_grpc_library targets
+
+py_library(
+    name = "grpc_library_replacement",
+    srcs = ["grpc_library_replacement.py"],
+)
+
+py_grpc_library(
+    name = "helloworld_py_pb2_grpc_library_changed",
+    srcs = [":helloworld_proto"],
+    grpc_library = ":grpc_library_replacement",
+    deps = [":helloworld_py_pb2"],
+)
+
+py_test(
+    name = "grpc_library_replacement_test",
+    srcs = ["grpc_library_replacement_test.py"],
+    main = "grpc_library_replacement_test.py",
+    python_version = "PY3",
+    deps = [
+        ":helloworld_py_pb2_grpc_library_changed",
     ],
 )

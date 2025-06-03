@@ -1,34 +1,39 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#include <condition_variable>
-
-#include <gtest/gtest.h>
+#ifndef GRPC_TEST_CPP_END2END_INTERCEPTORS_UTIL_H
+#define GRPC_TEST_CPP_END2END_INTERCEPTORS_UTIL_H
 
 #include <grpcpp/channel.h>
 
+#include <condition_variable>
+
+#include "absl/log/check.h"
+#include "absl/strings/str_format.h"
+#include "gtest/gtest.h"
+#include "src/core/util/crash.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "test/cpp/util/string_ref_helper.h"
 
 namespace grpc {
 namespace testing {
-/* This interceptor does nothing. Just keeps a global count on the number of
- * times it was invoked. */
+// This interceptor does nothing. Just keeps a global count on the number of
+// times it was invoked.
 class PhonyInterceptor : public experimental::Interceptor {
  public:
   PhonyInterceptor() {}
@@ -82,7 +87,7 @@ class PhonyInterceptorFactory
   }
 };
 
-/* This interceptor can be used to test the interception mechanism. */
+// This interceptor can be used to test the interception mechanism.
 class TestInterceptor : public experimental::Interceptor {
  public:
   TestInterceptor(const std::string& method, const char* suffix_for_stats,
@@ -118,7 +123,7 @@ class TestInterceptorFactory
   const char* suffix_for_stats_;
 };
 
-/* This interceptor factory returns nullptr on interceptor creation */
+// This interceptor factory returns nullptr on interceptor creation
 class NullInterceptorFactory
     : public experimental::ClientInterceptorFactoryInterface,
       public experimental::ServerInterceptorFactoryInterface {
@@ -141,8 +146,8 @@ class EchoTestServiceStreamingImpl : public EchoTestService::Service {
   Status Echo(ServerContext* context, const EchoRequest* request,
               EchoResponse* response) override {
     auto client_metadata = context->client_metadata();
-    for (const auto& pair : client_metadata) {
-      context->AddTrailingMetadata(ToString(pair.first), ToString(pair.second));
+    for (const auto& [key, value] : client_metadata) {
+      context->AddTrailingMetadata(ToString(key), ToString(value));
     }
     response->set_message(request->message());
     return Status::OK;
@@ -154,8 +159,8 @@ class EchoTestServiceStreamingImpl : public EchoTestService::Service {
     EchoRequest req;
     EchoResponse resp;
     auto client_metadata = context->client_metadata();
-    for (const auto& pair : client_metadata) {
-      context->AddTrailingMetadata(ToString(pair.first), ToString(pair.second));
+    for (const auto& [key, value] : client_metadata) {
+      context->AddTrailingMetadata(ToString(key), ToString(value));
     }
 
     while (stream->Read(&req)) {
@@ -169,12 +174,12 @@ class EchoTestServiceStreamingImpl : public EchoTestService::Service {
                        ServerReader<EchoRequest>* reader,
                        EchoResponse* resp) override {
     auto client_metadata = context->client_metadata();
-    for (const auto& pair : client_metadata) {
-      context->AddTrailingMetadata(ToString(pair.first), ToString(pair.second));
+    for (const auto& [key, value] : client_metadata) {
+      context->AddTrailingMetadata(ToString(key), ToString(value));
     }
 
     EchoRequest req;
-    string response_str = "";
+    string response_str;
     while (reader->Read(&req)) {
       response_str += req.message();
     }
@@ -185,8 +190,8 @@ class EchoTestServiceStreamingImpl : public EchoTestService::Service {
   Status ResponseStream(ServerContext* context, const EchoRequest* req,
                         ServerWriter<EchoResponse>* writer) override {
     auto client_metadata = context->client_metadata();
-    for (const auto& pair : client_metadata) {
-      context->AddTrailingMetadata(ToString(pair.first), ToString(pair.second));
+    for (const auto& [key, value] : client_metadata) {
+      context->AddTrailingMetadata(ToString(key), ToString(value));
     }
 
     EchoResponse resp;
@@ -287,7 +292,7 @@ class Verifier {
   // This version of Verify allows optionally ignoring the
   // outcome of the expectation
   void Verify(CompletionQueue* cq, bool ignore_ok) {
-    GPR_ASSERT(!expectations_.empty() || !maybe_expectations_.empty());
+    CHECK(!expectations_.empty() || !maybe_expectations_.empty());
     while (!expectations_.empty()) {
       Next(cq, ignore_ok);
     }
@@ -323,20 +328,17 @@ class Verifier {
         EXPECT_EQ(it->second, ok);
       }
       expectations_.erase(it);
-    } else {
-      auto it2 = maybe_expectations_.find(got_tag);
-      if (it2 != maybe_expectations_.end()) {
-        if (it2->second.seen != nullptr) {
-          EXPECT_FALSE(*it2->second.seen);
-          *it2->second.seen = true;
-        }
-        if (!ignore_ok) {
-          EXPECT_EQ(it2->second.ok, ok);
-        }
-      } else {
-        gpr_log(GPR_ERROR, "Unexpected tag: %p", got_tag);
-        abort();
+    } else if (auto it2 = maybe_expectations_.find(got_tag);
+               it2 != maybe_expectations_.end()) {
+      if (it2->second.seen != nullptr) {
+        EXPECT_FALSE(*it2->second.seen);
+        *it2->second.seen = true;
       }
+      if (!ignore_ok) {
+        EXPECT_EQ(it2->second.ok, ok);
+      }
+    } else {
+      grpc_core::Crash(absl::StrFormat("Unexpected tag: %p", got_tag));
     }
   }
 
@@ -352,3 +354,5 @@ class Verifier {
 
 }  // namespace testing
 }  // namespace grpc
+
+#endif  // GRPC_TEST_CPP_END2END_INTERCEPTORS_UTIL_H

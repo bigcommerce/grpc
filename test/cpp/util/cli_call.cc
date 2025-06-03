@@ -1,33 +1,35 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "test/cpp/util/cli_call.h"
+
+#include <grpc/grpc.h>
+#include <grpc/slice.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/support/byte_buffer.h>
 
 #include <cmath>
 #include <iostream>
 #include <utility>
 
-#include <grpc/grpc.h>
-#include <grpc/slice.h>
-#include <grpc/support/log.h>
-#include <grpcpp/channel.h>
-#include <grpcpp/client_context.h>
-#include <grpcpp/support/byte_buffer.h>
+#include "absl/log/check.h"
+#include "src/core/util/crash.h"
 
 namespace grpc {
 namespace testing {
@@ -79,7 +81,7 @@ CliCall::CliCall(const std::shared_ptr<grpc::Channel>& channel,
   void* got_tag;
   bool ok;
   cq_.Next(&got_tag, &ok);
-  GPR_ASSERT(ok);
+  CHECK(ok);
 }
 
 CliCall::~CliCall() {
@@ -91,12 +93,12 @@ void CliCall::Write(const std::string& request) {
   void* got_tag;
   bool ok;
 
-  gpr_slice s = gpr_slice_from_copied_buffer(request.data(), request.size());
+  grpc_slice s = grpc_slice_from_copied_buffer(request.data(), request.size());
   grpc::Slice req_slice(s, grpc::Slice::STEAL_REF);
   grpc::ByteBuffer send_buffer(&req_slice, 1);
   call_->Write(send_buffer, tag(2));
   cq_.Next(&got_tag, &ok);
-  GPR_ASSERT(ok);
+  CHECK(ok);
 }
 
 bool CliCall::Read(std::string* response,
@@ -111,7 +113,7 @@ bool CliCall::Read(std::string* response,
     return false;
   }
   std::vector<grpc::Slice> slices;
-  GPR_ASSERT(recv_buffer.Dump(&slices).ok());
+  CHECK(recv_buffer.Dump(&slices).ok());
 
   response->clear();
   for (size_t i = 0; i < slices.size(); i++) {
@@ -130,7 +132,7 @@ void CliCall::WritesDone() {
 
   call_->WritesDone(tag(4));
   cq_.Next(&got_tag, &ok);
-  GPR_ASSERT(ok);
+  CHECK(ok);
 }
 
 void CliCall::WriteAndWait(const std::string& request) {
@@ -173,7 +175,7 @@ bool CliCall::ReadAndMaybeNotifyWrite(
 
     cq_result = cq_.Next(&got_tag, &ok);
     if (got_tag == tag(2)) {
-      GPR_ASSERT(ok);
+      CHECK(ok);
     }
   }
 
@@ -184,7 +186,7 @@ bool CliCall::ReadAndMaybeNotifyWrite(
       gpr_mu_lock(&write_mu_);
       if (!write_done_) {
         cq_.Next(&got_tag, &ok);
-        GPR_ASSERT(got_tag != tag(2));
+        CHECK(got_tag != tag(2));
         write_done_ = true;
         gpr_cv_signal(&write_cv_);
       }
@@ -194,7 +196,7 @@ bool CliCall::ReadAndMaybeNotifyWrite(
   }
 
   std::vector<grpc::Slice> slices;
-  GPR_ASSERT(recv_buffer.Dump(&slices).ok());
+  CHECK(recv_buffer.Dump(&slices).ok());
   response->clear();
   for (size_t i = 0; i < slices.size(); i++) {
     response->append(reinterpret_cast<const char*>(slices[i].begin()),
@@ -213,7 +215,7 @@ Status CliCall::Finish(IncomingMetadataContainer* server_trailing_metadata) {
 
   call_->Finish(&status, tag(5));
   cq_.Next(&got_tag, &ok);
-  GPR_ASSERT(ok);
+  CHECK(ok);
   if (server_trailing_metadata) {
     *server_trailing_metadata = ctx_.GetServerTrailingMetadata();
   }

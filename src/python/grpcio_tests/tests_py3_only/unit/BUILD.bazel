@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+load("@rules_python//python:defs.bzl", "py_test")
+
 package(
     default_testonly = True,
 )
@@ -34,7 +36,6 @@ GRPCIO_PY3_ONLY_TESTS_UNIT = glob([
             "//src/python/grpcio_tests/tests/unit:resources",
             "//src/python/grpcio_tests/tests/unit:test_common",
             "//src/python/grpcio_tests/tests/unit/framework/common",
-            "@six",
         ],
     )
     for test_file_name in GRPCIO_PY3_ONLY_TESTS_UNIT

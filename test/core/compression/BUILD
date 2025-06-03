@@ -14,76 +14,71 @@
 
 load(
     "//bazel:grpc_build_system.bzl",
-    "grpc_cc_library",
     "grpc_cc_test",
     "grpc_package",
 )
-load("//test/core/util:grpc_fuzzer.bzl", "grpc_fuzzer")
+load("//test/core/test_util:grpc_fuzzer.bzl", "grpc_fuzz_test")
 
 grpc_package(name = "test/core/compression")
 
 licenses(["notice"])
 
-grpc_cc_library(
-    name = "args_utils",
-    testonly = 1,
-    srcs = ["args_utils.cc"],
-    hdrs = ["args_utils.h"],
-    visibility = ["//visibility:public"],
-    deps = ["//:grpc"],
-)
-
 grpc_cc_test(
     name = "compression_test",
     srcs = ["compression_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     uses_event_engine = False,
     uses_polling = False,
     deps = [
-        ":args_utils",
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//src/core:channel_args",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
-grpc_fuzzer(
+grpc_fuzz_test(
     name = "message_compress_fuzzer",
     srcs = ["message_compress_fuzzer.cc"],
-    corpus = "message_compress_corpus",
-    tags = ["no_windows"],
-    uses_event_engine = False,
-    uses_polling = False,
+    external_deps = [
+        "fuzztest",
+        "fuzztest_main",
+    ],
     deps = [
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
-grpc_fuzzer(
+grpc_fuzz_test(
     name = "message_decompress_fuzzer",
     srcs = ["message_decompress_fuzzer.cc"],
-    corpus = "message_decompress_corpus",
-    tags = ["no_windows"],
-    uses_event_engine = False,
-    uses_polling = False,
+    external_deps = [
+        "fuzztest",
+        "fuzztest_main",
+    ],
     deps = [
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "message_compress_test",
     srcs = ["message_compress_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )

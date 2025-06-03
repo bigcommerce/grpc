@@ -1,8 +1,8 @@
 gRPC C++ - Building from source
 ===========================
 
-This document has detailed instructions on how to build gRPC C++ from source. Note that it only covers the build of gRPC itself and is mostly meant for gRPC C++ contributors and/or power users.
-Other should follow the user instructions. See the [How to use](https://github.com/grpc/grpc/tree/master/src/cpp#to-start-using-grpc-c) instructions for guidance on how to add gRPC as a dependency to a C++ application (there are several ways and system wide installation is often not the best choice).
+This document has detailed instructions on how to build gRPC C++ from source. Note that it only covers the build of gRPC itself and is meant for gRPC C++ contributors and/or power users. 
+Other should follow the user instructions. See the [How to use](https://github.com/grpc/grpc/tree/master/src/cpp#to-start-using-grpc-c) instructions for guidance on how to add gRPC as a dependency to a C++ application (there are several ways and system-wide installation is often not the best choice).
 
 # Pre-requisites
 
@@ -55,7 +55,7 @@ installed by `brew` is being used:
 ## Windows
 
 To prepare for cmake + Microsoft Visual C++ compiler build
-- Install Visual Studio 2017 or later (Visual C++ compiler will be used).
+- Install Visual Studio 2022 or later (Visual C++ compiler will be used).
 - Install [Git](https://git-scm.com/).
 - Install [CMake](https://cmake.org/download/).
 - Install [nasm](https://www.nasm.us/) and add it to `PATH` (`choco install nasm`) - *required by boringssl*
@@ -88,14 +88,14 @@ with something else than `bazel` (e.g. `cmake`).
 
 # Build from source
 
-In the C++ world, there's no "standard" build system that would work for in all supported use cases and on all supported platforms.
+In the C++ world, there's no "standard" build system that would work for all supported use cases and on all supported platforms.
 Therefore, gRPC supports several major build systems, which should satisfy most users. Depending on your needs
 we recommend building using `bazel` or `cmake`.
 
 ## Building with bazel (recommended)
 
-Bazel is the primary build system for gRPC C++ and if you're comfortable with using bazel, we can certainly recommend it.
-Using bazel will give you the best developer experience as well as faster and cleaner builds.
+Bazel is the primary build system for gRPC C++. If you're comfortable using bazel, we can certainly recommend it.
+Using bazel will give you the best developer experience in addition to faster and cleaner builds.
 
 You'll need `bazel` version `1.0.0` or higher to build gRPC.
 See [Installing Bazel](https://docs.bazel.build/versions/master/install.html) for instructions how to install bazel on your system.
@@ -112,35 +112,38 @@ $ bazel build :all
 $ bazel test --config=dbg //test/...
 ```
 
-NOTE: If you are gRPC maintainer and you have access to our test cluster, you should use the our [gRPC's Remote Execution environment](tools/remote_build/README.md)
+NOTE: If you're using Bazel 7 or newer and working with gRPC, you'll need to turn off bzlmod.
+This is because gRPC isn't fully compatible with bzlmod yet. To do this, add --enable_bzlmod=false to your Bazel commands.
+
+NOTE: If you are a gRPC maintainer and you have access to our test cluster, you should use our [gRPC's Remote Execution environment](tools/remote_build/README.md)
 to get significant improvement to the build and test speed (and a bunch of other very useful features).
 
 ## Building with CMake
 
 ### Linux/Unix, Using Make
 
-Run from grpc directory after cloning the repo with --recursive or updating submodules.
+Run from the grpc directory after cloning the repo with --recursive or updating submodules.
 ```
 $ mkdir -p cmake/build
 $ cd cmake/build
-$ cmake ../..
+$ cmake -DCMAKE_CXX_STANDARD=17 ../..
 $ make
 ```
 
 If you want to build shared libraries (`.so` files), run `cmake` with `-DBUILD_SHARED_LIBS=ON`.
 
-### Windows, Using Visual Studio 2015 or 2017
+### Windows, Using Visual Studio 2022 or later
 
 When using the "Visual Studio" generator,
 cmake will generate a solution (`grpc.sln`) that contains a VS project for
-every target defined in `CMakeLists.txt` (+ few extra convenience projects
+every target defined in `CMakeLists.txt` (+ a few extra convenience projects
 added automatically by cmake). After opening the solution with Visual Studio
 you will be able to browse and build the code.
 ```
 > @rem Run from grpc directory after cloning the repo with --recursive or updating submodules.
 > md .build
 > cd .build
-> cmake .. -G "Visual Studio 14 2015"
+> cmake -G "Visual Studio 17 2022" -DCMAKE_CXX_STANDARD=17 ..
 > cmake --build . --config Release
 ```
 
@@ -156,7 +159,7 @@ installed to be able to compile the C/C++ sources.
 > md build
 > cd build
 > call "%VS140COMNTOOLS%..\..\VC\vcvarsall.bat" x64
-> cmake ..\.. -GNinja -DCMAKE_BUILD_TYPE=Release
+> cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 ..\..
 > cmake --build .
 ```
 
@@ -170,6 +173,15 @@ That said, we don't actively prohibit building DLLs on windows (it can be enable
 at your own risk.
 - you've been warned that there are some important drawbacks and some things might not work at all or will be broken in interesting ways.
 - we don't have extensive testing for DLL builds in place (to avoid maintenance costs, increased test duration etc.) so regressions / build breakages might occur
+
+### Consistent standard C++ version
+
+To avoid build errors when building gRPC and its dependencies (especially from gRPC C++ 1.70 onwards),
+ensure all CMake builds use the same C++ standard (at least C++17).
+This is crucial because gRPC C++ 1.70 requires at least C++17, and Abseil, a gRPC dependency,
+provides different APIs based on the C++ version.
+For instance, `absl::string_view` is implemented differently before and after C++17.
+Using a consistent C++ version prevents inconsistencies and ensures compatibility across the project.
 
 ### Dependency management
 
@@ -214,6 +226,7 @@ how to install dependencies with cmake before proceeding to installing gRPC itse
 # NOTE: all of gRPC's dependencies need to be already installed
 $ cmake ../.. -DgRPC_INSTALL=ON                \
               -DCMAKE_BUILD_TYPE=Release       \
+              -DCMAKE_CXX_STANDARD=17          \
               -DgRPC_ABSL_PROVIDER=package     \
               -DgRPC_CARES_PROVIDER=package    \
               -DgRPC_PROTOBUF_PROVIDER=package \

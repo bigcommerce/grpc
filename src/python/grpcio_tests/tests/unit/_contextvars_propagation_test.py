@@ -11,22 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Test of propagation of contextvars to AuthMetadataPlugin threads.."""
+"""Test of propagation of contextvars to AuthMetadataPlugin threads."""
 
 import contextlib
 import logging
 import os
-import sys
+import queue
+import tempfile
 import threading
 import unittest
 
 import grpc
-from six.moves import queue
 
 from tests.unit import test_common
 
-_UNARY_UNARY = "/test/UnaryUnary"
+_SERVICE_NAME = "test"
+_UNARY_UNARY = "UnaryUnary"
 _REQUEST = b"0000"
+_UDS_PATH = os.path.join(tempfile.mkdtemp(), "grpc_fullstack_test.sock")
 
 
 def _unary_unary_handler(request, context):
@@ -36,31 +38,32 @@ def _unary_unary_handler(request, context):
 def contextvars_supported():
     try:
         import contextvars
+
         return True
     except ImportError:
         return False
 
 
-class _GenericHandler(grpc.GenericRpcHandler):
-
-    def service(self, handler_call_details):
-        if handler_call_details.method == _UNARY_UNARY:
-            return grpc.unary_unary_rpc_method_handler(_unary_unary_handler)
-        else:
-            raise NotImplementedError()
+_METHOD_HANDLERS = {
+    _UNARY_UNARY: grpc.unary_unary_rpc_method_handler(_unary_unary_handler)
+}
 
 
 @contextlib.contextmanager
 def _server():
     try:
         server = test_common.test_server()
-        target = 'localhost:0'
-        port = server.add_insecure_port(target)
-        server.add_generic_rpc_handlers((_GenericHandler(),))
+        server.add_registered_method_handlers(_SERVICE_NAME, _METHOD_HANDLERS)
+        server_creds = grpc.local_server_credentials(
+            grpc.LocalConnectionType.UDS
+        )
+        server.add_secure_port(f"unix:{_UDS_PATH}", server_creds)
         server.start()
-        yield port
+        yield _UDS_PATH
     finally:
         server.stop(None)
+        if os.path.exists(_UDS_PATH):
+            os.remove(_UDS_PATH)
 
 
 if contextvars_supported():
@@ -73,15 +76,17 @@ if contextvars_supported():
         test_var.set(_EXPECTED_VALUE)
 
     class TestCallCredentials(grpc.AuthMetadataPlugin):
-
         def __call__(self, context, callback):
-            if test_var.get(
-            ) != _EXPECTED_VALUE and not test_common.running_under_gevent():
+            if (
+                test_var.get() != _EXPECTED_VALUE
+                and not test_common.running_under_gevent()
+            ):
                 # contextvars do not work under gevent, but the rest of this
                 # test is still valuable as a test of concurrent runs of the
                 # metadata credentials code path.
-                raise AssertionError("{} != {}".format(test_var.get(),
-                                                       _EXPECTED_VALUE))
+                raise AssertionError(
+                    "{} != {}".format(test_var.get(), _EXPECTED_VALUE)
+                )
             callback((), None)
 
         def assert_called(self, test):
@@ -94,7 +99,6 @@ else:
         pass
 
     class TestCallCredentials(grpc.AuthMetadataPlugin):
-
         def __call__(self, context, callback):
             callback((), None)
 
@@ -102,19 +106,28 @@ else:
 # TODO(https://github.com/grpc/grpc/issues/22257)
 @unittest.skipIf(os.name == "nt", "LocalCredentials not supported on Windows.")
 class ContextVarsPropagationTest(unittest.TestCase):
-
     def test_propagation_to_auth_plugin(self):
         set_up_expected_context()
-        with _server() as port:
-            target = "localhost:{}".format(port)
-            local_credentials = grpc.local_channel_credentials()
+        with _server() as uds_path:
+            local_credentials = grpc.local_channel_credentials(
+                grpc.LocalConnectionType.UDS
+            )
             test_call_credentials = TestCallCredentials()
             call_credentials = grpc.metadata_call_credentials(
-                test_call_credentials, "test call credentials")
+                test_call_credentials, "test call credentials"
+            )
             composite_credentials = grpc.composite_channel_credentials(
-                local_credentials, call_credentials)
-            with grpc.secure_channel(target, composite_credentials) as channel:
-                stub = channel.unary_unary(_UNARY_UNARY)
+                local_credentials, call_credentials
+            )
+            with grpc.secure_channel(
+                f"unix:{uds_path}", composite_credentials
+            ) as channel:
+                stub = channel.unary_unary(
+                    grpc._common.fully_qualified_method(
+                        _SERVICE_NAME, _UNARY_UNARY
+                    ),
+                    _registered_method=True,
+                )
                 response = stub(_REQUEST, wait_for_ready=True)
                 self.assertEqual(_REQUEST, response)
 
@@ -123,21 +136,30 @@ class ContextVarsPropagationTest(unittest.TestCase):
         _RPC_COUNT = 32
 
         set_up_expected_context()
-        with _server() as port:
-            target = "localhost:{}".format(port)
-            local_credentials = grpc.local_channel_credentials()
+        with _server() as uds_path:
+            local_credentials = grpc.local_channel_credentials(
+                grpc.LocalConnectionType.UDS
+            )
             test_call_credentials = TestCallCredentials()
             call_credentials = grpc.metadata_call_credentials(
-                test_call_credentials, "test call credentials")
+                test_call_credentials, "test call credentials"
+            )
             composite_credentials = grpc.composite_channel_credentials(
-                local_credentials, call_credentials)
+                local_credentials, call_credentials
+            )
             wait_group = test_common.WaitGroup(_THREAD_COUNT)
 
             def _run_on_thread(exception_queue):
                 try:
-                    with grpc.secure_channel(target,
-                                             composite_credentials) as channel:
-                        stub = channel.unary_unary(_UNARY_UNARY)
+                    with grpc.secure_channel(
+                        f"unix:{uds_path}", composite_credentials
+                    ) as channel:
+                        stub = channel.unary_unary(
+                            grpc._common.fully_qualified_method(
+                                _SERVICE_NAME, _UNARY_UNARY
+                            ),
+                            _registered_method=True,
+                        )
                         wait_group.done()
                         wait_group.wait()
                         for i in range(_RPC_COUNT):
@@ -161,6 +183,6 @@ class ContextVarsPropagationTest(unittest.TestCase):
                     raise q.get()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logging.basicConfig()
     unittest.main(verbosity=2)

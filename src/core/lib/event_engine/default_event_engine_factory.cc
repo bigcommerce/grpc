@@ -12,22 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "src/core/lib/event_engine/default_event_engine_factory.h"
+
+#include <grpc/event_engine/event_engine.h>
 #include <grpc/support/port_platform.h>
 
 #include <memory>
 
-#include "absl/memory/memory.h"
+#if defined(GPR_WINDOWS)
+#include "src/core/lib/event_engine/windows/windows_engine.h"
 
-#include <grpc/event_engine/event_engine.h>
+namespace grpc_event_engine::experimental {
 
-#include "src/core/lib/event_engine/iomgr_engine/iomgr_engine.h"
-
-namespace grpc_event_engine {
-namespace experimental {
-
-std::unique_ptr<EventEngine> DefaultEventEngineFactory() {
-  return absl::make_unique<IomgrEventEngine>();
+std::shared_ptr<EventEngine> DefaultEventEngineFactory() {
+  return std::make_shared<WindowsEventEngine>();
 }
 
-}  // namespace experimental
-}  // namespace grpc_event_engine
+}  // namespace grpc_event_engine::experimental
+#elif defined(GRPC_CFSTREAM)
+#include "src/core/lib/event_engine/cf_engine/cf_engine.h"
+
+namespace grpc_event_engine::experimental {
+
+std::shared_ptr<EventEngine> DefaultEventEngineFactory() {
+  return std::make_shared<CFEventEngine>();
+}
+
+}  // namespace grpc_event_engine::experimental
+#else
+#include "src/core/lib/event_engine/posix_engine/posix_engine.h"
+
+namespace grpc_event_engine::experimental {
+
+std::shared_ptr<EventEngine> DefaultEventEngineFactory() {
+  return PosixEventEngine::MakePosixEventEngine();
+}
+
+}  // namespace grpc_event_engine::experimental
+
+#endif

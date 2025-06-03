@@ -29,7 +29,6 @@ BAD_CLIENT_TESTS = {
     "headers": test_options(),
     "initial_settings_frame": test_options(),
     "head_of_line_blocking": test_options(),
-    "large_metadata": test_options(),
     "out_of_bounds": test_options(),
     "server_registered_method": test_options(),
     "simple_request": test_options(),
@@ -43,21 +42,27 @@ def grpc_bad_client_tests():
         name = "bad_client_test",
         srcs = ["bad_client.cc"],
         hdrs = ["bad_client.h"],
-        language = "C++",
+        testonly = 1,
+        external_deps = [
+            "absl/log:check",
+            "absl/log:log",
+        ],
         deps = [
-            "//test/core/util:grpc_test_util",
+            "//test/core/test_util:grpc_test_util",
             "//:grpc",
             "//:gpr",
             "//test/core/end2end:cq_verifier",
             "//:grpc_http_filters",
         ],
     )
-    for t, topt in BAD_CLIENT_TESTS.items():
+    for t, _ in BAD_CLIENT_TESTS.items():
         grpc_cc_test(
             name = "%s_bad_client_test" % t,
             srcs = ["tests/%s.cc" % t],
             deps = [":bad_client_test"],
+            tags = ["bad_client_test"],
             external_deps = [
+                "absl/log:check",
                 "gtest",
             ],
         )

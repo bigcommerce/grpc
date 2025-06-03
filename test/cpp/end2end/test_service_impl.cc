@@ -1,33 +1,35 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "test/cpp/end2end/test_service_impl.h"
 
-#include <string>
-#include <thread>
-
-#include <gtest/gtest.h>
-
-#include <grpc/support/log.h>
 #include <grpcpp/alarm.h>
 #include <grpcpp/security/credentials.h>
 #include <grpcpp/server_context.h>
 
+#include <string>
+#include <thread>
+
+#include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "gtest/gtest.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/notification.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "test/cpp/util/string_ref_helper.h"
 
@@ -76,10 +78,9 @@ int MetadataMatchCount(
     const std::multimap<grpc::string_ref, grpc::string_ref>& metadata,
     const std::string& key, const std::string& value) {
   int count = 0;
-  for (const auto& metadatum : metadata) {
-    if (ToString(metadatum.first) == key &&
-        ToString(metadatum.second) == value) {
-      count++;
+  for (const auto& [k, v] : metadata) {
+    if (ToString(k) == key && ToString(v) == value) {
+      ++count;
     }
   }
   return count;
@@ -92,7 +93,7 @@ int GetIntValueFromMetadataHelper(
   if (metadata.find(key) != metadata.end()) {
     std::istringstream iss(ToString(metadata.find(key)->second));
     iss >> default_value;
-    gpr_log(GPR_INFO, "%s : %d", key, default_value);
+    LOG(INFO) << key << " : " << default_value;
   }
 
   return default_value;
@@ -108,7 +109,7 @@ int GetIntValueFromMetadata(
 void ServerTryCancel(ServerContext* context) {
   EXPECT_FALSE(context->IsCancelled());
   context->TryCancel();
-  gpr_log(GPR_INFO, "Server called TryCancel() to cancel the request");
+  LOG(INFO) << "Server called TryCancel() to cancel the request";
   // Now wait until it's really canceled
   while (!context->IsCancelled()) {
     gpr_sleep_until(gpr_time_add(gpr_now(GPR_CLOCK_REALTIME),
@@ -119,8 +120,7 @@ void ServerTryCancel(ServerContext* context) {
 void ServerTryCancelNonblocking(CallbackServerContext* context) {
   EXPECT_FALSE(context->IsCancelled());
   context->TryCancel();
-  gpr_log(GPR_INFO,
-          "Server called TryCancelNonblocking() to cancel the request");
+  LOG(INFO) << "Server called TryCancelNonblocking() to cancel the request";
 }
 
 }  // namespace internal
@@ -161,7 +161,8 @@ ServerUnaryReactor* CallbackTestServiceImpl::Echo(
         // Set an alarm for that much time
         alarm_.Set(
             gpr_time_add(gpr_now(GPR_CLOCK_MONOTONIC),
-                         gpr_time_from_micros(req_->param().server_sleep_us(),
+                         gpr_time_from_micros(req_->param().server_sleep_us() *
+                                                  grpc_test_slowdown_factor(),
                                               GPR_TIMESPAN)),
             [this](bool ok) { NonDelayed(ok); });
         return;
@@ -206,8 +207,8 @@ ServerUnaryReactor* CallbackTestServiceImpl::Echo(
         return;
       }
       if (req_->has_param() && req_->param().server_die()) {
-        gpr_log(GPR_ERROR, "The request should not reach application handler.");
-        GPR_ASSERT(0);
+        LOG(ERROR) << "The request should not reach application handler.";
+        CHECK(0);
       }
       if (req_->has_param() && req_->param().has_expected_error()) {
         const auto& error = req_->param().expected_error();
@@ -224,9 +225,18 @@ ServerUnaryReactor* CallbackTestServiceImpl::Echo(
         // RPC as long as server_try_cancel is not DO_NOT_CANCEL
         EXPECT_FALSE(ctx_->IsCancelled());
         ctx_->TryCancel();
-        gpr_log(GPR_INFO, "Server called TryCancel() to cancel the request");
+        LOG(INFO) << "Server called TryCancel() to cancel the request";
         FinishWhenCancelledAsync();
         return;
+      }
+      if (req_->has_param() &&
+          req_->param().compression_algorithm() != RequestParams::NONE) {
+        if (req_->param().compression_algorithm() == RequestParams::DEFLATE) {
+          ctx_->set_compression_algorithm(GRPC_COMPRESS_DEFLATE);
+        } else if (req_->param().compression_algorithm() ==
+                   RequestParams::GZIP) {
+          ctx_->set_compression_algorithm(GRPC_COMPRESS_GZIP);
+        }
       }
       resp_->set_message(req_->message());
       internal::MaybeEchoDeadline(ctx_, req_, resp_);
@@ -248,7 +258,8 @@ ServerUnaryReactor* CallbackTestServiceImpl::Echo(
       } else if (req_->has_param() && req_->param().server_cancel_after_us()) {
         alarm_.Set(gpr_time_add(gpr_now(GPR_CLOCK_REALTIME),
                                 gpr_time_from_micros(
-                                    req_->param().server_cancel_after_us(),
+                                    req_->param().server_cancel_after_us() *
+                                        grpc_test_slowdown_factor(),
                                     GPR_TIMESPAN)),
                    [this](bool) { Finish(Status::CANCELLED); });
         return;
@@ -259,9 +270,8 @@ ServerUnaryReactor* CallbackTestServiceImpl::Echo(
       if (req_->has_param() && req_->param().echo_metadata_initially()) {
         const std::multimap<grpc::string_ref, grpc::string_ref>&
             client_metadata = ctx_->client_metadata();
-        for (const auto& metadatum : client_metadata) {
-          ctx_->AddInitialMetadata(ToString(metadatum.first),
-                                   ToString(metadatum.second));
+        for (const auto& [key, value] : client_metadata) {
+          ctx_->AddInitialMetadata(ToString(key), ToString(value));
         }
         StartSendInitialMetadata();
       }
@@ -269,9 +279,8 @@ ServerUnaryReactor* CallbackTestServiceImpl::Echo(
       if (req_->has_param() && req_->param().echo_metadata()) {
         const std::multimap<grpc::string_ref, grpc::string_ref>&
             client_metadata = ctx_->client_metadata();
-        for (const auto& metadatum : client_metadata) {
-          ctx_->AddTrailingMetadata(ToString(metadatum.first),
-                                    ToString(metadatum.second));
+        for (const auto& [key, value] : client_metadata) {
+          ctx_->AddTrailingMetadata(ToString(key), ToString(value));
         }
         // Terminate rpc with error and debug info in trailer.
         if (req_->param().debug_info().stack_entries_size() ||
@@ -285,7 +294,7 @@ ServerUnaryReactor* CallbackTestServiceImpl::Echo(
         }
       }
       if (req_->has_param() &&
-          (req_->param().expected_client_identity().length() > 0 ||
+          (!req_->param().expected_client_identity().empty() ||
            req_->param().check_auth_context())) {
         internal::CheckServerAuthContext(
             ctx_, req_->param().expected_transport_security_type(),
@@ -392,7 +401,7 @@ ServerReadReactor<EchoRequest>* CallbackTestServiceImpl::RequestStream(
         num_msgs_read_++;
         StartRead(&request_);
       } else {
-        gpr_log(GPR_INFO, "Read: %d messages", num_msgs_read_);
+        LOG(INFO) << "Read: " << num_msgs_read_ << " messages";
 
         if (server_try_cancel_ == CANCEL_DURING_PROCESSING) {
           // Let OnCancel recover this
@@ -570,6 +579,7 @@ CallbackTestServiceImpl::BidiStream(CallbackServerContext* context) {
       delete this;
     }
     void OnCancel() override {
+      cancel_notification_.Notify();
       EXPECT_TRUE(setup_done_);
       EXPECT_TRUE(ctx_->IsCancelled());
       FinishOnce(Status::CANCELLED);
@@ -589,6 +599,7 @@ CallbackTestServiceImpl::BidiStream(CallbackServerContext* context) {
           }
         }
       } else if (client_try_cancel_) {
+        cancel_notification_.WaitForNotificationWithTimeout(absl::Seconds(10));
         EXPECT_TRUE(ctx_->IsCancelled());
       }
 
@@ -631,6 +642,7 @@ CallbackTestServiceImpl::BidiStream(CallbackServerContext* context) {
     bool setup_done_{false};
     std::thread finish_thread_;
     bool client_try_cancel_ = false;
+    grpc_core::Notification cancel_notification_;
   };
 
   return new Reactor(context);

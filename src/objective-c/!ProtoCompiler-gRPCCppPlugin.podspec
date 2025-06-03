@@ -42,7 +42,7 @@ Pod::Spec.new do |s|
   # exclamation mark ensures that other "regular" pods will be able to find it as it'll be installed
   # before them.
   s.name     = '!ProtoCompiler-gRPCCppPlugin'
-  v = '1.49.0-dev'
+  v = '1.74.0-dev'
   s.version  = v
   s.summary  = 'The gRPC ProtoC plugin generates C++ files from .proto services.'
   s.description = <<-DESC
@@ -100,12 +100,13 @@ Pod::Spec.new do |s|
   s.preserve_paths = plugin
 
   # Restrict the protoc version to the one supported by this plugin.
-  s.dependency '!ProtoCompiler', '3.19.4'
-  # For the Protobuf dependency not to complain:
-  s.ios.deployment_target = '9.0'
-  s.osx.deployment_target = '10.10'
-  s.tvos.deployment_target = '10.0'
-  s.watchos.deployment_target = '2.0'
+  s.dependency '!ProtoCompiler', '4.31.0'
+
+  s.ios.deployment_target = '15.0'
+  s.osx.deployment_target = '11.0'
+  s.tvos.deployment_target = '13.0'
+  s.watchos.deployment_target = '6.0'
+  s.visionos.deployment_target = '1.0'
 
   # This is only for local development of the plugin: If the Podfile brings this pod from a local
   # directory using `:path`, CocoaPods won't download the zip file and so the plugin won't be
@@ -113,6 +114,8 @@ Pod::Spec.new do |s|
   # and, if absent, compile the plugin from the local sources.
   s.prepare_command = <<-CMD
     set -e
-    #{bazel} build //src/compiler:grpc_cpp_plugin
+    if [ ! -f #{plugin} ]; then
+      #{bazel} build //src/compiler:grpc_cpp_plugin
+    fi
   CMD
 end

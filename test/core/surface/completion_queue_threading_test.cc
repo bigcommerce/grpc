@@ -1,42 +1,48 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <gtest/gtest.h>
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
+#include <grpc/support/sync.h>
 #include <grpc/support/time.h>
+#include <inttypes.h>
+#include <stdlib.h>
 
-#include "src/core/lib/gpr/useful.h"
-#include "src/core/lib/gprpp/thd.h"
-#include "src/core/lib/iomgr/iomgr.h"
+#include <memory>
+
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "gtest/gtest.h"
+#include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/surface/completion_queue.h"
-#include "test/core/util/test_config.h"
+#include "src/core/util/crash.h"
+#include "src/core/util/thd.h"
+#include "src/core/util/useful.h"
+#include "test/core/test_util/test_config.h"
 
-#define LOG_TEST(x) gpr_log(GPR_INFO, "%s", x)
+#define LOG_TEST(x) LOG(INFO) << x
 
 static void* create_test_tag(void) {
   static intptr_t i = 0;
   return reinterpret_cast<void*>(++i);
 }
 
-/* helper for tests to shutdown correctly and tersely */
+// helper for tests to shutdown correctly and tersely
 static void shutdown_and_destroy(grpc_completion_queue* cc) {
   grpc_event ev;
   grpc_completion_queue_shutdown(cc);
@@ -53,7 +59,7 @@ static void shutdown_and_destroy(grpc_completion_queue* cc) {
       break;
     }
     default: {
-      gpr_log(GPR_ERROR, "Unknown completion type");
+      LOG(ERROR) << "Unknown completion type";
       break;
     }
   }
@@ -102,7 +108,7 @@ static void test_too_many_plucks(void) {
     threads[i].Start();
   }
 
-  /* wait until all other threads are plucking */
+  // wait until all other threads are plucking
   gpr_sleep_until(grpc_timeout_milliseconds_to_deadline(1000));
 
   ev = grpc_completion_queue_pluck(cc, create_test_tag(),
@@ -111,7 +117,7 @@ static void test_too_many_plucks(void) {
 
   for (i = 0; i < GPR_ARRAY_SIZE(tags); i++) {
     ASSERT_TRUE(grpc_cq_begin_op(cc, tags[i]));
-    grpc_cq_end_op(cc, tags[i], GRPC_ERROR_NONE, do_nothing_end_completion,
+    grpc_cq_end_op(cc, tags[i], absl::OkStatus(), do_nothing_end_completion,
                    nullptr, &completions[i]);
   }
 
@@ -147,30 +153,30 @@ static void producer_thread(void* arg) {
   test_thread_options* opt = static_cast<test_thread_options*>(arg);
   int i;
 
-  gpr_log(GPR_INFO, "producer %d started", opt->id);
+  LOG(INFO) << "producer " << opt->id << " started";
   gpr_event_set(&opt->on_started, reinterpret_cast<void*>(1));
   ASSERT_TRUE(gpr_event_wait(opt->phase1, ten_seconds_time()));
 
-  gpr_log(GPR_INFO, "producer %d phase 1", opt->id);
+  LOG(INFO) << "producer " << opt->id << " phase 1";
   for (i = 0; i < TEST_THREAD_EVENTS; i++) {
     ASSERT_TRUE(grpc_cq_begin_op(opt->cc, (void*)(intptr_t)1));
   }
 
-  gpr_log(GPR_INFO, "producer %d phase 1 done", opt->id);
+  LOG(INFO) << "producer " << opt->id << " phase 1 done";
   gpr_event_set(&opt->on_phase1_done, reinterpret_cast<void*>(1));
   ASSERT_TRUE(gpr_event_wait(opt->phase2, ten_seconds_time()));
 
-  gpr_log(GPR_INFO, "producer %d phase 2", opt->id);
+  LOG(INFO) << "producer " << opt->id << " phase 2";
   for (i = 0; i < TEST_THREAD_EVENTS; i++) {
     grpc_core::ExecCtx exec_ctx;
-    grpc_cq_end_op(opt->cc, reinterpret_cast<void*>(1), GRPC_ERROR_NONE,
+    grpc_cq_end_op(opt->cc, reinterpret_cast<void*>(1), absl::OkStatus(),
                    free_completion, nullptr,
                    static_cast<grpc_cq_completion*>(
                        gpr_malloc(sizeof(grpc_cq_completion))));
     opt->events_triggered++;
   }
 
-  gpr_log(GPR_INFO, "producer %d phase 2 done", opt->id);
+  LOG(INFO) << "producer " << opt->id << " phase 2 done";
   gpr_event_set(&opt->on_finished, reinterpret_cast<void*>(1));
 }
 
@@ -178,17 +184,17 @@ static void consumer_thread(void* arg) {
   test_thread_options* opt = static_cast<test_thread_options*>(arg);
   grpc_event ev;
 
-  gpr_log(GPR_INFO, "consumer %d started", opt->id);
+  LOG(INFO) << "consumer " << opt->id << " started";
   gpr_event_set(&opt->on_started, reinterpret_cast<void*>(1));
   ASSERT_TRUE(gpr_event_wait(opt->phase1, ten_seconds_time()));
 
-  gpr_log(GPR_INFO, "consumer %d phase 1", opt->id);
+  LOG(INFO) << "consumer " << opt->id << " phase 1";
 
-  gpr_log(GPR_INFO, "consumer %d phase 1 done", opt->id);
+  LOG(INFO) << "consumer " << opt->id << " phase 1 done";
   gpr_event_set(&opt->on_phase1_done, reinterpret_cast<void*>(1));
   ASSERT_TRUE(gpr_event_wait(opt->phase2, ten_seconds_time()));
 
-  gpr_log(GPR_INFO, "consumer %d phase 2", opt->id);
+  LOG(INFO) << "consumer " << opt->id << " phase 2";
   for (;;) {
     ev = grpc_completion_queue_next(
         opt->cc, gpr_inf_future(GPR_CLOCK_MONOTONIC), nullptr);
@@ -198,12 +204,11 @@ static void consumer_thread(void* arg) {
         opt->events_triggered++;
         break;
       case GRPC_QUEUE_SHUTDOWN:
-        gpr_log(GPR_INFO, "consumer %d phase 2 done", opt->id);
+        LOG(INFO) << "consumer " << opt->id << " phase 2 done";
         gpr_event_set(&opt->on_finished, reinterpret_cast<void*>(1));
         return;
       case GRPC_QUEUE_TIMEOUT:
-        gpr_log(GPR_ERROR, "Invalid timeout received");
-        abort();
+        grpc_core::Crash("Invalid timeout received");
     }
   }
 }
@@ -218,10 +223,10 @@ static void test_threading(size_t producers, size_t consumers) {
   size_t total_consumed = 0;
   static int optid = 101;
 
-  gpr_log(GPR_INFO, "%s: %" PRIuPTR " producers, %" PRIuPTR " consumers",
-          "test_threading", producers, consumers);
+  LOG(INFO) << "test_threading: " << producers << " producers, " << consumers
+            << " consumers";
 
-  /* start all threads: they will wait for phase1 */
+  // start all threads: they will wait for phase1
   grpc_core::Thread* threads = static_cast<grpc_core::Thread*>(
       gpr_malloc(sizeof(*threads) * (producers + consumers)));
   for (i = 0; i < producers + consumers; i++) {
@@ -243,33 +248,33 @@ static void test_threading(size_t producers, size_t consumers) {
     gpr_event_wait(&options[i].on_started, ten_seconds_time());
   }
 
-  /* start phase1: producers will pre-declare all operations they will
-     complete */
-  gpr_log(GPR_INFO, "start phase 1");
+  // start phase1: producers will pre-declare all operations they will
+  // complete
+  LOG(INFO) << "start phase 1";
   gpr_event_set(&phase1, reinterpret_cast<void*>(1));
 
-  gpr_log(GPR_INFO, "wait phase 1");
+  LOG(INFO) << "wait phase 1";
   for (i = 0; i < producers + consumers; i++) {
     ASSERT_TRUE(gpr_event_wait(&options[i].on_phase1_done, ten_seconds_time()));
   }
-  gpr_log(GPR_INFO, "done phase 1");
+  LOG(INFO) << "done phase 1";
 
-  /* start phase2: operations will complete, and consumers will consume them */
-  gpr_log(GPR_INFO, "start phase 2");
+  // start phase2: operations will complete, and consumers will consume them
+  LOG(INFO) << "start phase 2";
   gpr_event_set(&phase2, reinterpret_cast<void*>(1));
 
-  /* in parallel, we shutdown the completion channel - all events should still
-     be consumed */
+  // in parallel, we shutdown the completion channel - all events should still
+  // be consumed
   grpc_completion_queue_shutdown(cc);
 
-  /* join all threads */
-  gpr_log(GPR_INFO, "wait phase 2");
+  // join all threads
+  LOG(INFO) << "wait phase 2";
   for (i = 0; i < producers + consumers; i++) {
     ASSERT_TRUE(gpr_event_wait(&options[i].on_finished, ten_seconds_time()));
   }
-  gpr_log(GPR_INFO, "done phase 2");
+  LOG(INFO) << "done phase 2";
 
-  /* destroy the completion channel */
+  // destroy the completion channel
   grpc_completion_queue_destroy(cc);
 
   for (i = 0; i < producers + consumers; i++) {
@@ -277,7 +282,7 @@ static void test_threading(size_t producers, size_t consumers) {
   }
   gpr_free(threads);
 
-  /* verify that everything was produced and consumed */
+  // verify that everything was produced and consumed
   for (i = 0; i < producers + consumers; i++) {
     if (i < producers) {
       ASSERT_EQ(options[i].events_triggered, TEST_THREAD_EVENTS);

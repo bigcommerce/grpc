@@ -161,6 +161,9 @@ class CallInvokerChangeRequestCall
 
 class CallInvokerTest extends \PHPUnit\Framework\TestCase
 {
+    private $server;
+    private $port;
+
     public function setUp(): void
     {
         $this->server = new Grpc\Server([]);
@@ -191,7 +194,7 @@ class CallInvokerTest extends \PHPUnit\Framework\TestCase
         $stub = new \Grpc\BaseStub('localhost:50051',
           ['credentials' => \Grpc\ChannelCredentials::createInsecure(),
             'grpc_call_invoker' => $call_invoker]);
-        $this->assertEquals($call_invoker->getChannel()->getTarget(), 'localhost:50050');
+        $this->assertEquals($call_invoker->getChannel()->getTarget(), 'dns:///localhost:50050');
         $call_invoker->getChannel()->close();
     }
 
@@ -212,16 +215,18 @@ class CallInvokerTest extends \PHPUnit\Framework\TestCase
         $this->assertSame('/phony_method', $event->method);
         $server_call = $event->call;
         $event = $server_call->startBatch([
+            Grpc\OP_RECV_MESSAGE => true,
+        ]);
+        $this->assertSame('intercepted_unary_request', $event->message);
+        $event = $server_call->startBatch([
             Grpc\OP_SEND_INITIAL_METADATA => [],
             Grpc\OP_SEND_STATUS_FROM_SERVER => [
                 'metadata' => [],
                 'code' => Grpc\STATUS_OK,
                 'details' => '',
             ],
-            Grpc\OP_RECV_MESSAGE => true,
             Grpc\OP_RECV_CLOSE_ON_SERVER => true,
         ]);
-        $this->assertSame('intercepted_unary_request', $event->message);
         $call_invoker->getChannel()->close();
         unset($unary_call);
         unset($server_call);

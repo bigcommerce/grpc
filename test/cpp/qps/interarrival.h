@@ -1,30 +1,30 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-#ifndef TEST_QPS_INTERARRIVAL_H
-#define TEST_QPS_INTERARRIVAL_H
+#ifndef GRPC_TEST_CPP_QPS_INTERARRIVAL_H
+#define GRPC_TEST_CPP_QPS_INTERARRIVAL_H
+
+#include <grpcpp/support/config.h>
 
 #include <chrono>
 #include <cmath>
 #include <random>
 #include <vector>
-
-#include <grpcpp/support/config.h>
 
 namespace grpc {
 namespace testing {
@@ -87,7 +87,7 @@ class InterarrivalTimer {
       thread_posns_.push_back(random_table_.begin() + (entries * i) / threads);
     }
   }
-  virtual ~InterarrivalTimer(){};
+  virtual ~InterarrivalTimer() {};
 
   int64_t next(int thread_num) {
     auto ret = *(thread_posns_[thread_num]++);
@@ -105,4 +105,4 @@ class InterarrivalTimer {
 }  // namespace testing
 }  // namespace grpc
 
-#endif
+#endif  // GRPC_TEST_CPP_QPS_INTERARRIVAL_H

@@ -1,33 +1,33 @@
-/*
- *
- * Copyright 2019 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-#include <vector>
-
+//
+//
+// Copyright 2019 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 #include <grpc/grpc.h>
 #include <grpc/support/time.h>
 
-#include "src/core/lib/gprpp/thd.h"
+#include <vector>
+
 #include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/iomgr/iocp_windows.h"
 #include "src/core/lib/iomgr/iomgr_internal.h"
 #include "src/core/lib/iomgr/pollset.h"
 #include "src/core/lib/iomgr/pollset_windows.h"
 #include "src/core/lib/surface/init.h"
-#include "test/core/util/test_config.h"
+#include "src/core/util/thd.h"
+#include "test/core/test_util/test_config.h"
 
 #if defined(GRPC_WINSOCK_SOCKET)
 
@@ -112,8 +112,7 @@ int main(int argc, char** argv) {
   gpr_mu_lock(&params.mu);
   while (
       params.queuing != THREADS &&
-      !gpr_cv_wait(&params.cv, &params.mu, gpr_inf_future(GPR_CLOCK_REALTIME)))
-    ;
+      !gpr_cv_wait(&params.cv, &params.mu, gpr_inf_future(GPR_CLOCK_REALTIME)));
   gpr_mu_unlock(&params.mu);
 
   // Wait for the mutexes to be released. This indicates that the threads have
@@ -133,13 +132,12 @@ int main(int argc, char** argv) {
   gpr_mu_lock(&params.mu);
   while (
       params.complete != THREADS &&
-      !gpr_cv_wait(&params.cv, &params.mu, gpr_inf_future(GPR_CLOCK_REALTIME)))
-    ;
+      !gpr_cv_wait(&params.cv, &params.mu, gpr_inf_future(GPR_CLOCK_REALTIME)));
   gpr_mu_unlock(&params.mu);
 
   for (auto& t : threads) t.Join();
   return EXIT_SUCCESS;
 }
-#else /* defined(GRPC_WINSOCK_SOCKET) */
+#else  // defined(GRPC_WINSOCK_SOCKET)
 int main(int /*argc*/, char** /*argv*/) { return 0; }
 #endif

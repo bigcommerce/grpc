@@ -1,38 +1,33 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <string.h>
-
-#include <gtest/gtest.h>
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpc/byte_buffer.h>
 #include <grpc/byte_buffer_reader.h>
+#include <grpc/compression.h>
 #include <grpc/grpc.h>
 #include <grpc/slice.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-#include <grpc/support/time.h>
+#include <string.h>
 
-#include "src/core/lib/gprpp/thd.h"
-#include "src/core/lib/iomgr/exec_ctx.h"
-#include "test/core/util/test_config.h"
+#include <memory>
 
-#define LOG_TEST(x) gpr_log(GPR_INFO, "%s", x)
+#include "absl/log/log.h"
+#include "gtest/gtest.h"
+#include "test/core/test_util/test_config.h"
 
 TEST(GrpcByteBufferReaderTest, TestReadOneSlice) {
   grpc_slice slice;
@@ -41,7 +36,7 @@ TEST(GrpcByteBufferReaderTest, TestReadOneSlice) {
   grpc_slice first_slice, second_slice;
   int first_code, second_code;
 
-  LOG_TEST("test_read_one_slice");
+  LOG(INFO) << "test_read_one_slice";
   slice = grpc_slice_from_copied_string("test");
   buffer = grpc_raw_byte_buffer_create(&slice, 1);
   grpc_slice_unref(slice);
@@ -63,7 +58,7 @@ TEST(GrpcByteBufferReaderTest, TestReadOneSliceMalloc) {
   grpc_slice first_slice, second_slice;
   int first_code, second_code;
 
-  LOG_TEST("test_read_one_slice_malloc");
+  LOG(INFO) << "test_read_one_slice_malloc";
   slice = grpc_slice_malloc(4);
   memcpy(GRPC_SLICE_START_PTR(slice), "test", 4);
   buffer = grpc_raw_byte_buffer_create(&slice, 1);
@@ -86,7 +81,7 @@ TEST(GrpcByteBufferReaderTest, TestReadNoneCompressedSlice) {
   grpc_slice first_slice, second_slice;
   int first_code, second_code;
 
-  LOG_TEST("test_read_none_compressed_slice");
+  LOG(INFO) << "test_read_none_compressed_slice";
   slice = grpc_slice_from_copied_string("test");
   buffer = grpc_raw_byte_buffer_create(&slice, 1);
   grpc_slice_unref(slice);
@@ -109,7 +104,7 @@ TEST(GrpcByteBufferReaderTest, TestPeekOneSlice) {
   grpc_slice* second_slice;
   int first_code, second_code;
 
-  LOG_TEST("test_peek_one_slice");
+  LOG(INFO) << "test_peek_one_slice";
   slice = grpc_slice_from_copied_string("test");
   buffer = grpc_raw_byte_buffer_create(&slice, 1);
   grpc_slice_unref(slice);
@@ -131,7 +126,7 @@ TEST(GrpcByteBufferReaderTest, TestPeekOneSliceMalloc) {
   grpc_slice* second_slice;
   int first_code, second_code;
 
-  LOG_TEST("test_peek_one_slice_malloc");
+  LOG(INFO) << "test_peek_one_slice_malloc";
   slice = grpc_slice_malloc(4);
   memcpy(GRPC_SLICE_START_PTR(slice), "test", 4);
   buffer = grpc_raw_byte_buffer_create(&slice, 1);
@@ -154,7 +149,7 @@ TEST(GrpcByteBufferReaderTest, TestPeekNoneCompressedSlice) {
   grpc_slice* second_slice;
   int first_code, second_code;
 
-  LOG_TEST("test_peek_none_compressed_slice");
+  LOG(INFO) << "test_peek_none_compressed_slice";
   slice = grpc_slice_from_copied_string("test");
   buffer = grpc_raw_byte_buffer_create(&slice, 1);
   grpc_slice_unref(slice);
@@ -173,7 +168,7 @@ TEST(GrpcByteBufferReaderTest, TestByteBufferFromReader) {
   grpc_byte_buffer *buffer, *buffer_from_reader;
   grpc_byte_buffer_reader reader;
 
-  LOG_TEST("test_byte_buffer_from_reader");
+  LOG(INFO) << "test_byte_buffer_from_reader";
   slice = grpc_slice_malloc(4);
   memcpy(GRPC_SLICE_START_PTR(slice), "test", 4);
   buffer = grpc_raw_byte_buffer_create(&slice, 1);
@@ -202,11 +197,11 @@ TEST(GrpcByteBufferReaderTest, TestReadall) {
   grpc_byte_buffer_reader reader;
   grpc_slice slice_out;
 
-  LOG_TEST("test_readall");
+  LOG(INFO) << "test_readall";
 
   memset(lotsa_as, 'a', 512 * sizeof(lotsa_as[0]));
   memset(lotsa_bs, 'b', 1024 * sizeof(lotsa_bs[0]));
-  /* use slices large enough to overflow inlining */
+  // use slices large enough to overflow inlining
   slices[0] = grpc_slice_malloc(512);
   memcpy(GRPC_SLICE_START_PTR(slices[0]), lotsa_as, 512);
   slices[1] = grpc_slice_malloc(1024);
@@ -236,11 +231,11 @@ TEST(GrpcByteBufferReaderTest, TestByteBufferCopy) {
   grpc_byte_buffer_reader reader;
   grpc_slice slice_out;
 
-  LOG_TEST("test_byte_buffer_copy");
+  LOG(INFO) << "test_byte_buffer_copy";
 
   memset(lotsa_as, 'a', 512 * sizeof(lotsa_as[0]));
   memset(lotsa_bs, 'b', 1024 * sizeof(lotsa_bs[0]));
-  /* use slices large enough to overflow inlining */
+  // use slices large enough to overflow inlining
   slices[0] = grpc_slice_malloc(512);
   memcpy(GRPC_SLICE_START_PTR(slices[0]), lotsa_as, 512);
   slices[1] = grpc_slice_malloc(1024);

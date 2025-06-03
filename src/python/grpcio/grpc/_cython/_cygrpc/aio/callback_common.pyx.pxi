@@ -43,14 +43,14 @@ cdef class CallbackWrapper:
         self._reference_of_future = future
         self._reference_of_failure_handler = failure_handler
         # NOTE(lidiz) We need to ensure when Core invokes our callback, the
-        # callback function itself is not deallocated. Othersise, we will get
+        # callback function itself is not deallocated. Otherwise, we will get
         # a segfault. We can view this as Core holding a ref.
         cpython.Py_INCREF(self)
 
     @staticmethod
     cdef void functor_run(
             grpc_completion_queue_functor* functor,
-            int success):
+            int success) noexcept:
         cdef CallbackContext *context = <CallbackContext *>functor
         cdef object waiter = <object>context.waiter
         if not waiter.cancelled():
@@ -93,7 +93,8 @@ async def execute_batch(GrpcCallWrapper grpc_call_wrapper,
         wrapper.c_functor(), NULL)
 
     if error != GRPC_CALL_OK:
-        raise ExecuteBatchError("Failed grpc_call_start_batch: {}".format(error))
+        grpc_call_error_string = grpc_call_error_to_string(error).decode()
+        raise ExecuteBatchError("Failed grpc_call_start_batch: {} with grpc_call_error value: '{}'".format(error, grpc_call_error_string))
 
     await future
 
@@ -113,7 +114,7 @@ cdef prepend_send_initial_metadata_op(tuple ops, tuple metadata):
 
 async def _receive_message(GrpcCallWrapper grpc_call_wrapper,
                            object loop):
-    """Retrives parsed messages from Core.
+    """Retrieves parsed messages from Core.
 
     The messages maybe already in Core's buffer, so there isn't a 1-to-1
     mapping between this and the underlying "socket.read()". Also, eventually,

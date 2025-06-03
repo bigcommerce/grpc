@@ -1,44 +1,46 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "src/core/lib/surface/completion_queue.h"
 
-#include <gtest/gtest.h>
-
 #include <grpc/grpc.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
+#include <grpc/support/sync.h>
 #include <grpc/support/time.h>
+#include <stddef.h>
 
-#include "src/core/lib/gpr/useful.h"
-#include "src/core/lib/gprpp/memory.h"
-#include "src/core/lib/gprpp/sync.h"
-#include "src/core/lib/iomgr/iomgr.h"
-#include "test/core/util/test_config.h"
+#include <memory>
 
-#define LOG_TEST(x) gpr_log(GPR_INFO, "%s", x)
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "gtest/gtest.h"
+#include "src/core/lib/event_engine/shim.h"
+#include "src/core/lib/iomgr/exec_ctx.h"
+#include "src/core/util/useful.h"
+#include "test/core/test_util/test_config.h"
+
+#define LOG_TEST(x) LOG(INFO) << x
 
 static void* create_test_tag(void) {
   static intptr_t i = 0;
   return reinterpret_cast<void*>(++i);
 }
 
-/* helper for tests to shutdown correctly and tersely */
+// helper for tests to shutdown correctly and tersely
 static void shutdown_and_destroy(grpc_completion_queue* cc) {
   grpc_event ev;
   grpc_completion_queue_shutdown(cc);
@@ -62,7 +64,7 @@ static void shutdown_and_destroy(grpc_completion_queue* cc) {
       break;
     }
     default: {
-      gpr_log(GPR_ERROR, "Unknown completion type");
+      LOG(ERROR) << "Unknown completion type";
       break;
     }
   }
@@ -70,12 +72,12 @@ static void shutdown_and_destroy(grpc_completion_queue* cc) {
   grpc_completion_queue_destroy(cc);
 }
 
-/* ensure we can create and destroy a completion channel */
+// ensure we can create and destroy a completion channel
 TEST(GrpcCompletionQueueTest, TestNoOp) {
   grpc_cq_completion_type completion_types[] = {GRPC_CQ_NEXT, GRPC_CQ_PLUCK};
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   LOG_TEST("test_no_op");
 
   attr.version = 1;
@@ -90,11 +92,15 @@ TEST(GrpcCompletionQueueTest, TestNoOp) {
 }
 
 TEST(GrpcCompletionQueueTest, TestPollsetConversion) {
+  if (grpc_event_engine::experimental::UsePollsetAlternative()) {
+    GTEST_SKIP_(
+        "Pollsets aren't used when EventEngine experiments are enabled.");
+  }
   grpc_cq_completion_type completion_types[] = {GRPC_CQ_NEXT, GRPC_CQ_PLUCK};
   grpc_cq_polling_type polling_types[] = {GRPC_CQ_DEFAULT_POLLING,
                                           GRPC_CQ_NON_LISTENING};
   grpc_completion_queue* cq;
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
 
   LOG_TEST("test_pollset_conversion");
 
@@ -115,7 +121,7 @@ TEST(GrpcCompletionQueueTest, TestWaitEmpty) {
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
   grpc_completion_queue* cc;
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   grpc_event event;
 
   LOG_TEST("test_wait_empty");
@@ -142,7 +148,7 @@ TEST(GrpcCompletionQueueTest, TestCqEndOp) {
   grpc_cq_completion completion;
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   void* tag = create_test_tag();
 
   LOG_TEST("test_cq_end_op");
@@ -156,8 +162,8 @@ TEST(GrpcCompletionQueueTest, TestCqEndOp) {
         grpc_completion_queue_factory_lookup(&attr), &attr, nullptr);
 
     ASSERT_TRUE(grpc_cq_begin_op(cc, tag));
-    grpc_cq_end_op(cc, tag, GRPC_ERROR_NONE, do_nothing_end_completion, nullptr,
-                   &completion);
+    grpc_cq_end_op(cc, tag, absl::OkStatus(), do_nothing_end_completion,
+                   nullptr, &completion);
 
     ev = grpc_completion_queue_next(cc, gpr_inf_past(GPR_CLOCK_REALTIME),
                                     nullptr);
@@ -175,7 +181,7 @@ TEST(GrpcCompletionQueueTest, TestCqTlsCacheFull) {
   grpc_cq_completion completion;
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   void* tag = create_test_tag();
   void* res_tag;
   int ok;
@@ -192,8 +198,8 @@ TEST(GrpcCompletionQueueTest, TestCqTlsCacheFull) {
 
     grpc_completion_queue_thread_local_cache_init(cc);
     ASSERT_TRUE(grpc_cq_begin_op(cc, tag));
-    grpc_cq_end_op(cc, tag, GRPC_ERROR_NONE, do_nothing_end_completion, nullptr,
-                   &completion);
+    grpc_cq_end_op(cc, tag, absl::OkStatus(), do_nothing_end_completion,
+                   nullptr, &completion);
 
     ev = grpc_completion_queue_next(cc, gpr_inf_past(GPR_CLOCK_REALTIME),
                                     nullptr);
@@ -216,7 +222,7 @@ TEST(GrpcCompletionQueueTest, TestCqTlsCacheEmpty) {
   grpc_completion_queue* cc;
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   void* res_tag;
   int ok;
 
@@ -243,7 +249,7 @@ TEST(GrpcCompletionQueueTest, TestShutdownThenNextPolling) {
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
   grpc_completion_queue* cc;
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   grpc_event event;
   LOG_TEST("test_shutdown_then_next_polling");
 
@@ -265,7 +271,7 @@ TEST(GrpcCompletionQueueTest, TestShutdownThenNextWithTimeout) {
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
   grpc_completion_queue* cc;
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   grpc_event event;
   LOG_TEST("test_shutdown_then_next_with_timeout");
 
@@ -291,7 +297,7 @@ TEST(GrpcCompletionQueueTest, TestPluck) {
   grpc_cq_completion completions[GPR_ARRAY_SIZE(tags)];
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   unsigned i, j;
 
   LOG_TEST("test_pluck");
@@ -313,7 +319,7 @@ TEST(GrpcCompletionQueueTest, TestPluck) {
 
     for (i = 0; i < GPR_ARRAY_SIZE(tags); i++) {
       ASSERT_TRUE(grpc_cq_begin_op(cc, tags[i]));
-      grpc_cq_end_op(cc, tags[i], GRPC_ERROR_NONE, do_nothing_end_completion,
+      grpc_cq_end_op(cc, tags[i], absl::OkStatus(), do_nothing_end_completion,
                      nullptr, &completions[i]);
     }
 
@@ -325,7 +331,7 @@ TEST(GrpcCompletionQueueTest, TestPluck) {
 
     for (i = 0; i < GPR_ARRAY_SIZE(tags); i++) {
       ASSERT_TRUE(grpc_cq_begin_op(cc, tags[i]));
-      grpc_cq_end_op(cc, tags[i], GRPC_ERROR_NONE, do_nothing_end_completion,
+      grpc_cq_end_op(cc, tags[i], absl::OkStatus(), do_nothing_end_completion,
                      nullptr, &completions[i]);
     }
 
@@ -345,7 +351,7 @@ TEST(GrpcCompletionQueueTest, TestPluckAfterShutdown) {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
   grpc_event ev;
   grpc_completion_queue* cc;
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
 
   LOG_TEST("test_pluck_after_shutdown");
 
@@ -369,7 +375,7 @@ TEST(GrpcCompletionQueueTest, TestCallback) {
   grpc_cq_completion completions[GPR_ARRAY_SIZE(tags)];
   grpc_cq_polling_type polling_types[] = {
       GRPC_CQ_DEFAULT_POLLING, GRPC_CQ_NON_LISTENING, GRPC_CQ_NON_POLLING};
-  grpc_completion_queue_attributes attr;
+  grpc_completion_queue_attributes attr = {};
   unsigned i;
   static gpr_mu mu, shutdown_mu;
   static gpr_cv cv, shutdown_cv;
@@ -450,7 +456,7 @@ TEST(GrpcCompletionQueueTest, TestCallback) {
 
       for (i = 0; i < GPR_ARRAY_SIZE(tags); i++) {
         ASSERT_TRUE(grpc_cq_begin_op(cc, tags[i]));
-        grpc_cq_end_op(cc, tags[i], GRPC_ERROR_NONE, do_nothing_end_completion,
+        grpc_cq_end_op(cc, tags[i], absl::OkStatus(), do_nothing_end_completion,
                        nullptr, &completions[i]);
       }
 

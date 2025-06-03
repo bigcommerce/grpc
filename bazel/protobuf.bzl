@@ -18,24 +18,36 @@ load("@rules_proto//proto:defs.bzl", "ProtoInfo")
 _PROTO_EXTENSION = ".proto"
 _VIRTUAL_IMPORTS = "/_virtual_imports/"
 
+_WELL_KNOWN_PROTOS_BASE = [
+    "any_proto",
+    "api_proto",
+    "compiler_plugin_proto",
+    "descriptor_proto",
+    "duration_proto",
+    "empty_proto",
+    "field_mask_proto",
+    "source_context_proto",
+    "struct_proto",
+    "timestamp_proto",
+    "type_proto",
+    "wrappers_proto",
+]
+
 def well_known_proto_libs():
-    return [
-        "@com_google_protobuf//:any_proto",
-        "@com_google_protobuf//:api_proto",
-        "@com_google_protobuf//:compiler_plugin_proto",
-        "@com_google_protobuf//:descriptor_proto",
-        "@com_google_protobuf//:duration_proto",
-        "@com_google_protobuf//:empty_proto",
-        "@com_google_protobuf//:field_mask_proto",
-        "@com_google_protobuf//:source_context_proto",
-        "@com_google_protobuf//:struct_proto",
-        "@com_google_protobuf//:timestamp_proto",
-        "@com_google_protobuf//:type_proto",
-        "@com_google_protobuf//:wrappers_proto",
-    ]
+    return ["@com_google_protobuf//:" + b for b in _WELL_KNOWN_PROTOS_BASE]
 
 def is_well_known(label):
-    return label in well_known_proto_libs()
+    # Bazel surfaces labels as their underlying identity, even if they are referenced
+    # via aliases. Bazel also does not currently provide a way to find the real label
+    # underlying an alias. So the implementation detail that the WKTs present at the
+    # top level of the protobuf repo are actually backed by targets in the
+    # //src/google/protobuf package leaks through here.
+    # We include both the alias path and the underlying path to be resilient to
+    # reversions of this change as well as for continuing compatibility with repos
+    # that happen to pull in older versions of protobuf.
+    all_wkt_targets = (["@com_google_protobuf//:" + b for b in _WELL_KNOWN_PROTOS_BASE] +
+                       ["@com_google_protobuf//src/google/protobuf:" + b for b in _WELL_KNOWN_PROTOS_BASE])
+    return label in all_wkt_targets
 
 def get_proto_root(workspace_root):
     """Gets the root protobuf directory.
@@ -113,6 +125,7 @@ def get_plugin_args(
         flags,
         dir_out,
         generate_mocks,
+        allow_deprecated = False,
         plugin_name = "PLUGIN"):
     """Returns arguments configuring protoc to use a plugin for a language.
 
@@ -121,6 +134,8 @@ def get_plugin_args(
       flags: The plugin flags to be passed to protoc.
       dir_out: The output directory for the plugin.
       generate_mocks: A bool indicating whether to generate mocks.
+      allow_deprecated: A bool indicating whether to mark generated class deprecated
+      based on deprecated proto option in service file.
       plugin_name: A name of the plugin, it is required to be unique when there
       are more than one plugin used in a single protoc command.
     Returns:
@@ -129,6 +144,8 @@ def get_plugin_args(
     augmented_flags = list(flags)
     if generate_mocks:
         augmented_flags.append("generate_mock_code=true")
+    if allow_deprecated:
+        augmented_flags.append("allow_deprecated=true")
 
     augmented_dir_out = dir_out
     if augmented_flags:

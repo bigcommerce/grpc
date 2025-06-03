@@ -1,22 +1,24 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "test/cpp/util/proto_file_parser.h"
+
+#include <grpcpp/support/config.h>
 
 #include <algorithm>
 #include <iostream>
@@ -25,8 +27,6 @@
 
 #include "absl/memory/memory.h"
 #include "absl/strings/str_split.h"
-
-#include <grpcpp/support/config.h>
 
 namespace grpc {
 namespace testing {
@@ -48,16 +48,16 @@ class ErrorPrinter : public protobuf::compiler::MultiFileErrorCollector {
  public:
   explicit ErrorPrinter(ProtoFileParser* parser) : parser_(parser) {}
 
-  void AddError(const std::string& filename, int line, int column,
-                const std::string& message) override {
+  void RecordError(absl::string_view filename, int line, int column,
+                   absl::string_view message) override {
     std::ostringstream oss;
     oss << "error " << filename << " " << line << " " << column << " "
         << message << "\n";
     parser_->LogError(oss.str());
   }
 
-  void AddWarning(const std::string& filename, int line, int column,
-                  const std::string& message) override {
+  void RecordWarning(absl::string_view filename, int line, int column,
+                     absl::string_view message) override {
     std::cerr << "warning " << filename << " " << line << " " << column << " "
               << message << std::endl;
   }
@@ -74,7 +74,7 @@ ProtoFileParser::ProtoFileParser(const std::shared_ptr<grpc::Channel>& channel,
   std::vector<std::string> service_list;
   if (channel) {
     reflection_db_ =
-        absl::make_unique<grpc::ProtoReflectionDescriptorDatabase>(channel);
+        std::make_unique<grpc::ProtoReflectionDescriptorDatabase>(channel);
     reflection_db_->GetServices(&service_list);
   }
 
@@ -84,8 +84,8 @@ ProtoFileParser::ProtoFileParser(const std::shared_ptr<grpc::Channel>& channel,
              proto_path, GRPC_CLI_PATH_SEPARATOR, absl::AllowEmpty())) {
       source_tree_.MapPath("", std::string(single_path));
     }
-    error_printer_ = absl::make_unique<ErrorPrinter>(this);
-    importer_ = absl::make_unique<protobuf::compiler::Importer>(
+    error_printer_ = std::make_unique<ErrorPrinter>(this);
+    importer_ = std::make_unique<protobuf::compiler::Importer>(
         &source_tree_, error_printer_.get());
 
     std::string file_name;
@@ -95,7 +95,7 @@ ProtoFileParser::ProtoFileParser(const std::shared_ptr<grpc::Channel>& channel,
       if (file_desc) {
         for (int i = 0; i < file_desc->service_count(); i++) {
           service_desc_list_.push_back(file_desc->service(i));
-          known_services.insert(file_desc->service(i)->full_name());
+          known_services.emplace(file_desc->service(i)->full_name());
         }
       } else {
         std::cerr << file_name << " not found" << std::endl;
@@ -103,7 +103,7 @@ ProtoFileParser::ProtoFileParser(const std::shared_ptr<grpc::Channel>& channel,
     }
 
     file_db_ =
-        absl::make_unique<protobuf::DescriptorPoolDatabase>(*importer_->pool());
+        std::make_unique<protobuf::DescriptorPoolDatabase>(*importer_->pool());
   }
 
   if (!reflection_db_ && !file_db_) {
@@ -116,11 +116,11 @@ ProtoFileParser::ProtoFileParser(const std::shared_ptr<grpc::Channel>& channel,
   } else if (!file_db_) {
     desc_db_ = std::move(reflection_db_);
   } else {
-    desc_db_ = absl::make_unique<protobuf::MergedDescriptorDatabase>(
+    desc_db_ = std::make_unique<protobuf::MergedDescriptorDatabase>(
         reflection_db_.get(), file_db_.get());
   }
 
-  desc_pool_ = absl::make_unique<protobuf::DescriptorPool>(desc_db_.get());
+  desc_pool_ = std::make_unique<protobuf::DescriptorPool>(desc_db_.get());
 
   for (auto it = service_list.begin(); it != service_list.end(); it++) {
     if (known_services.find(*it) == known_services.end()) {
@@ -148,7 +148,7 @@ std::string ProtoFileParser::GetFullMethodName(const std::string& method) {
     const auto* service_desc = *it;
     for (int j = 0; j < service_desc->method_count(); j++) {
       const auto* method_desc = service_desc->method(j);
-      if (MethodNameMatch(method_desc->full_name(), method)) {
+      if (MethodNameMatch(std::string(method_desc->full_name()), method)) {
         if (method_descriptor) {
           std::ostringstream error_stream;
           error_stream << "Ambiguous method names: ";
@@ -169,7 +169,7 @@ std::string ProtoFileParser::GetFullMethodName(const std::string& method) {
 
   known_methods_[method] = method_descriptor->full_name();
 
-  return method_descriptor->full_name();
+  return std::string(method_descriptor->full_name());
 }
 
 std::string ProtoFileParser::GetFormattedMethodName(const std::string& method) {
@@ -200,8 +200,8 @@ std::string ProtoFileParser::GetMessageTypeFromMethod(const std::string& method,
     return "";
   }
 
-  return is_request ? method_desc->input_type()->full_name()
-                    : method_desc->output_type()->full_name();
+  return std::string(is_request ? method_desc->input_type()->full_name()
+                                : method_desc->output_type()->full_name());
 }
 
 bool ProtoFileParser::IsStreaming(const std::string& method, bool is_request) {

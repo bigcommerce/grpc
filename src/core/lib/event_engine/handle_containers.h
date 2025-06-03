@@ -11,11 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-#ifndef GRPC_CORE_LIB_EVENT_ENGINE_HANDLE_CONTAINERS_H
-#define GRPC_CORE_LIB_EVENT_ENGINE_HANDLE_CONTAINERS_H
+#ifndef GRPC_SRC_CORE_LIB_EVENT_ENGINE_HANDLE_CONTAINERS_H
+#define GRPC_SRC_CORE_LIB_EVENT_ENGINE_HANDLE_CONTAINERS_H
 
+#include <grpc/event_engine/event_engine.h>
 #include <grpc/support/port_platform.h>
-
 #include <stddef.h>
 
 #include <cstdint>
@@ -24,10 +24,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/hash/hash.h"
 
-#include <grpc/event_engine/event_engine.h>
-
-namespace grpc_event_engine {
-namespace experimental {
+namespace grpc_event_engine::experimental {
 
 // Used for heterogeneous lookup of TaskHandles in abseil containers.
 template <typename TaskHandle>
@@ -39,29 +36,16 @@ struct TaskHandleComparator {
       return absl::Hash<HashType>()({handle.keys[0], handle.keys[1]});
     }
   };
-  struct Eq {
-    using is_transparent = void;
-    bool operator()(const TaskHandle& lhs, const TaskHandle& rhs) const {
-      return lhs.keys[0] == rhs.keys[0] && lhs.keys[1] == rhs.keys[1];
-    }
-  };
 };
 
-using TaskHandleSet = absl::flat_hash_set<
-    grpc_event_engine::experimental::EventEngine::TaskHandle,
-    TaskHandleComparator<
-        grpc_event_engine::experimental::EventEngine::TaskHandle>::Hash,
-    TaskHandleComparator<
-        grpc_event_engine::experimental::EventEngine::TaskHandle>::Eq>;
+using TaskHandleSet =
+    absl::flat_hash_set<EventEngine::TaskHandle,
+                        TaskHandleComparator<EventEngine::TaskHandle>::Hash>;
 
-using LookupTaskHandleSet = absl::flat_hash_set<
-    grpc_event_engine::experimental::EventEngine::DNSResolver::LookupTaskHandle,
-    TaskHandleComparator<grpc_event_engine::experimental::EventEngine::
-                             DNSResolver::LookupTaskHandle>::Hash,
-    TaskHandleComparator<grpc_event_engine::experimental::EventEngine::
-                             DNSResolver::LookupTaskHandle>::Eq>;
+using ConnectionHandleSet = absl::flat_hash_set<
+    EventEngine::ConnectionHandle,
+    TaskHandleComparator<EventEngine::ConnectionHandle>::Hash>;
 
-}  // namespace experimental
-}  // namespace grpc_event_engine
+}  // namespace grpc_event_engine::experimental
 
-#endif  // GRPC_CORE_LIB_EVENT_ENGINE_HANDLE_CONTAINERS_H
+#endif  // GRPC_SRC_CORE_LIB_EVENT_ENGINE_HANDLE_CONTAINERS_H

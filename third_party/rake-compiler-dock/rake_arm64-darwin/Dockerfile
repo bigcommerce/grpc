@@ -1,1 +1,1 @@
-FROM larskanis/rake-compiler-dock-mri-arm64-darwin:1.2.2
+FROM ghcr.io/rake-compiler/rake-compiler-dock-image:1.9.1-mri-arm64-darwin

@@ -16,17 +16,17 @@
 
 #include "test/cpp/interop/istio_echo_server_lib.h"
 
+#include <grpcpp/client_context.h>
+#include <grpcpp/grpcpp.h>
+
 #include <thread>
 
+#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
 #include "absl/synchronization/blocking_counter.h"
-
-#include <grpcpp/client_context.h>
-#include <grpcpp/grpcpp.h>
-
-#include "src/core/lib/gprpp/host_port.h"
+#include "src/core/util/host_port.h"
 #include "src/proto/grpc/testing/istio_echo.pb.h"
 
 using proto::EchoRequest;
@@ -40,7 +40,7 @@ namespace testing {
 namespace {
 
 const absl::string_view kRequestIdField = "x-request-id";
-// const absl::string_view kServiceVersionField = "ServiceVersion";
+const absl::string_view kServiceVersionField = "ServiceVersion";
 // const absl::string_view kServicePortField = "ServicePort";
 const absl::string_view kStatusCodeField = "StatusCode";
 // const absl::string_view kUrlField = "URL";
@@ -66,8 +66,10 @@ struct EchoCall {
 }  // namespace
 
 EchoTestServiceImpl::EchoTestServiceImpl(std::string hostname,
+                                         std::string service_version,
                                          std::string forwarding_address)
     : hostname_(std::move(hostname)),
+      service_version_(std::move(service_version)),
       forwarding_address_(std::move(forwarding_address)) {
   forwarding_stub_ = EchoTestService::NewStub(
       CreateChannel(forwarding_address_, InsecureChannelCredentials()));
@@ -98,16 +100,16 @@ Status EchoTestServiceImpl::Echo(ServerContext* context,
   //  need to add/remove fields later, if required by tests. Only keep the
   //  fields needed for now.
   //
-  //  absl::StrAppend(&s,kServiceVersionField,"=",this->version_,"\n");
   //  absl::StrAppend(&s,kServicePortField,"=",this->port_,"\n");
   //  absl::StrAppend(&s,kClusterField,"=",this->cluster_,"\n");
   //  absl::StrAppend(&s,kIstioVersionField,"=",this->istio_version_,"\n");
+  absl::StrAppend(&s, kServiceVersionField, "=", this->service_version_, "\n");
   absl::StrAppend(&s, kIpField, "=", host, "\n");
   absl::StrAppend(&s, kStatusCodeField, "=", std::to_string(200), "\n");
   absl::StrAppend(&s, kHostnameField, "=", this->hostname_, "\n");
   absl::StrAppend(&s, "Echo=", request->message(), "\n");
   response->set_message(s);
-  gpr_log(GPR_INFO, "Echo response:\n%s", s.c_str());
+  LOG(INFO) << "Echo response:\n" << s;
   return Status::OK;
 }
 
@@ -127,8 +129,7 @@ Status EchoTestServiceImpl::ForwardEcho(ServerContext* context,
   if (scheme == "xds") {
     // We can optionally add support for TLS creds, but we are primarily
     // concerned with proxyless-grpc here.
-    gpr_log(GPR_INFO, "Creating channel to %s using xDS Creds",
-            raw_url.c_str());
+    LOG(INFO) << "Creating channel to " << raw_url << " using xDS Creds";
     channel =
         CreateChannel(raw_url, XdsCredentials(InsecureChannelCredentials()));
   } else if (scheme == "grpc") {
@@ -136,11 +137,11 @@ Status EchoTestServiceImpl::ForwardEcho(ServerContext* context,
     // this to be supported. If we ever decide to add support for this properly,
     // we would need to add support for TLS creds here.
     absl::string_view address = absl::StripPrefix(raw_url, "grpc://");
-    gpr_log(GPR_INFO, "Creating channel to %s", std::string(address).c_str());
+    LOG(INFO) << "Creating channel to " << address;
     channel = CreateChannel(std::string(address), InsecureChannelCredentials());
   } else {
-    gpr_log(GPR_INFO, "Protocol %s not supported. Forwarding to %s",
-            scheme.c_str(), forwarding_address_.c_str());
+    LOG(INFO) << "Protocol " << scheme << " not supported. Forwarding to "
+              << forwarding_address_;
     ClientContext forwarding_ctx;
     forwarding_ctx.set_deadline(context->deadline());
     return forwarding_stub_->ForwardEcho(&forwarding_ctx, *request, response);
@@ -166,9 +167,12 @@ Status EchoTestServiceImpl::ForwardEcho(ServerContext* context,
         calls[i].context.AddMetadata(header.key(), header.value());
       }
     }
+    constexpr int kDefaultTimeout = 5 * 1000 * 1000 /* 5 seconds */;
     std::chrono::system_clock::time_point deadline =
         std::chrono::system_clock::now() +
-        std::chrono::microseconds(request->timeout_micros());
+        std::chrono::microseconds(request->timeout_micros() > 0
+                                      ? request->timeout_micros()
+                                      : kDefaultTimeout);
     calls[i].context.set_deadline(deadline);
     stub->async()->Echo(&calls[i].context, &echo_request, &calls[i].response,
                         [&, index = i](Status s) {
@@ -192,11 +196,10 @@ Status EchoTestServiceImpl::ForwardEcho(ServerContext* context,
         absl::StrAppend(&body, absl::StrFormat("[%d body] %s\n", i, line));
       }
       response->add_output(body);
-      gpr_log(GPR_INFO, "Forward Echo response:%d\n%s", i, body.c_str());
+      LOG(INFO) << "Forward Echo response:" << i << "\n" << body;
     } else {
-      gpr_log(GPR_ERROR, "RPC %d failed %d: %s", i,
-              calls[i].status.error_code(),
-              calls[i].status.error_message().c_str());
+      LOG(ERROR) << "RPC " << i << " failed " << calls[i].status.error_code()
+                 << ": " << calls[i].status.error_message();
       response->clear_output();
       return calls[i].status;
     }

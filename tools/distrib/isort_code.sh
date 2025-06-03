@@ -31,29 +31,11 @@ DIRS=(
     'test'
     'tools'
     'setup.py'
-    'tools/run_tests/xds_k8s_test_driver'
 )
 
-VIRTUALENV=isort_virtual_environment
-
+VIRTUALENV=venv_isort_code
 python3 -m virtualenv $VIRTUALENV
-PYTHON=${VIRTUALENV}/bin/python
-"$PYTHON" -m pip install isort==5.9.2
+source $VIRTUALENV/bin/activate
 
-$PYTHON -m isort $ACTION \
-  --force-sort-within-sections \
-  --force-single-line-imports --single-line-exclusions=typing \
-  --src "examples/python/data_transmission" \
-  --src "examples/python/async_streaming" \
-  --src "tools/run_tests/xds_k8s_test_driver" \
-  --src "src/python/grpcio_tests" \
-  --src "tools/run_tests" \
-  --project "examples" \
-  --project "src" \
-  --thirdparty "grpc" \
-  --skip-glob "third_party/*" \
-  --skip-glob "*/env/*" \
-  --skip-glob "*pb2*.py" \
-  --skip-glob "**/site-packages/**/*" \
-  --dont-follow-links \
-  "${DIRS[@]}"
+python3 -m pip install isort==5.9.2
+python3 -m isort $ACTION --settings-path=black.toml --dont-follow-links "${DIRS[@]}"

@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef LOCAL_GOOGLE_HOME_CTILLER_GRPC_TEST_CORE_RESOURCE_QUOTA_CALL_CHECKER_H_
-#define LOCAL_GOOGLE_HOME_CTILLER_GRPC_TEST_CORE_RESOURCE_QUOTA_CALL_CHECKER_H_
+#ifndef GRPC_TEST_CORE_RESOURCE_QUOTA_CALL_CHECKER_H
+#define GRPC_TEST_CORE_RESOURCE_QUOTA_CALL_CHECKER_H
 
 #include <memory>
 
-#include <grpc/support/log.h>
+#include "absl/log/check.h"
 
 namespace grpc_core {
 namespace testing {
@@ -33,11 +33,11 @@ class CallChecker {
  public:
   explicit CallChecker(bool optional) : optional_(optional) {}
   ~CallChecker() {
-    if (!optional_) GPR_ASSERT(called_);
+    if (!optional_) CHECK(called_);
   }
 
   void Called() {
-    GPR_ASSERT(!called_);
+    CHECK(!called_);
     called_ = true;
   }
 
@@ -57,4 +57,4 @@ class CallChecker {
 }  // namespace testing
 }  // namespace grpc_core
 
-#endif  // LOCAL_GOOGLE_HOME_CTILLER_GRPC_TEST_CORE_RESOURCE_QUOTA_CALL_CHECKER_H_
+#endif  // GRPC_TEST_CORE_RESOURCE_QUOTA_CALL_CHECKER_H

@@ -1,24 +1,30 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <grpc/support/port_platform.h>
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "test/cpp/util/grpc_tool.h"
+
+#include <grpc/grpc.h>
+#include <grpc/support/port_platform.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/grpcpp.h>
+#include <grpcpp/security/credentials.h>
+#include <grpcpp/support/string_ref.h>
 
 #include <cstdio>
 #include <fstream>
@@ -27,17 +33,12 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "absl/flags/flag.h"
-#include "absl/memory/memory.h"
-
-#include <grpc/grpc.h>
-#include <grpcpp/channel.h>
-#include <grpcpp/create_channel.h>
-#include <grpcpp/grpcpp.h>
-#include <grpcpp/security/credentials.h>
-#include <grpcpp/support/string_ref.h>
-
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 #include "test/cpp/util/cli_call.h"
 #include "test/cpp/util/proto_file_parser.h"
 #include "test/cpp/util/proto_reflection_descriptor_database.h"
@@ -79,6 +80,13 @@ ABSL_FLAG(bool, batch, false,
 ABSL_FLAG(double, timeout, -1,
           "Specify timeout in seconds, used to set the deadline for all "
           "RPCs. The default value of -1 means no deadline has been set.");
+ABSL_FLAG(
+    int, max_recv_msg_size, 0,
+    "Specify the max receive message size in bytes for all RPCs. -1 indicates "
+    "unlimited. The default value of 0 means to use the gRPC default.");
+ABSL_FLAG(std::string, channel_args, "",
+          "Comma-separated list of key=value gRPC ChannelArgs to apply "
+          "(a=b,c=d,...). Values may be integers or strings.");
 
 namespace grpc {
 namespace testing {
@@ -228,18 +236,33 @@ void ReadResponse(CliCall* call, const std::string& method_name,
 }
 
 std::shared_ptr<grpc::Channel> CreateCliChannel(
-    const std::string& server_address, const CliCredentials& cred) {
-  grpc::ChannelArguments args;
+    const std::string& server_address, const CliCredentials& cred,
+    const grpc::ChannelArguments& extra_args) {
+  grpc::ChannelArguments args(extra_args);
   if (!cred.GetSslTargetNameOverride().empty()) {
     args.SetSslTargetNameOverride(cred.GetSslTargetNameOverride());
   }
   if (!absl::GetFlag(FLAGS_default_service_config).empty()) {
     args.SetString(GRPC_ARG_SERVICE_CONFIG,
-                   absl::GetFlag(FLAGS_default_service_config).c_str());
+                   absl::GetFlag(FLAGS_default_service_config));
   }
   // See |GRPC_ARG_MAX_METADATA_SIZE| in |grpc_types.h|.
   // Set to large enough size (10M) that should work for most use cases.
   args.SetInt(GRPC_ARG_MAX_METADATA_SIZE, 10 * 1024 * 1024);
+
+  // Extend channel args according to flag --channel_args.
+  const auto flag = absl::GetFlag(FLAGS_channel_args);
+  for (absl::string_view arg :
+       absl::StrSplit(flag, ',', absl::SkipWhitespace())) {
+    std::pair<std::string, std::string> kv =
+        absl::StrSplit(arg, absl::MaxSplits('=', 1), absl::SkipWhitespace());
+    int ival;
+    if (absl::SimpleAtoi(kv.second, &ival)) {
+      args.SetInt(kv.first, ival);
+    } else if (!kv.second.empty()) {
+      args.SetString(kv.first, kv.second);
+    }
+  }
   return grpc::CreateCustomChannel(server_address, cred.GetCredentials(), args);
 }
 
@@ -314,7 +337,7 @@ int GrpcToolMainLib(int argc, const char** argv, const CliCredentials& cred,
     const bool ok = cmd->function(&grpc_tool, argc, argv, cred, callback);
     return ok ? 0 : 1;
   } else {
-    Usage("Invalid command '" + std::string(command.c_str()) + "'");
+    Usage("Invalid command '" + command + "'");
   }
   return 1;
 }
@@ -363,7 +386,7 @@ bool GrpcTool::ListServices(int argc, const char** argv,
 
   std::string server_address(argv[0]);
   std::shared_ptr<grpc::Channel> channel =
-      CreateCliChannel(server_address, cred);
+      CreateCliChannel(server_address, cred, grpc::ChannelArguments());
   grpc::ProtoReflectionDescriptorDatabase desc_db(channel);
   grpc::protobuf::DescriptorPool desc_pool(&desc_db);
 
@@ -464,7 +487,7 @@ bool GrpcTool::PrintType(int /*argc*/, const char** argv,
 
   std::string server_address(argv[0]);
   std::shared_ptr<grpc::Channel> channel =
-      CreateCliChannel(server_address, cred);
+      CreateCliChannel(server_address, cred, grpc::ChannelArguments());
   grpc::ProtoReflectionDescriptorDatabase desc_db(channel);
   grpc::protobuf::DescriptorPool desc_pool(&desc_db);
 
@@ -504,6 +527,9 @@ bool GrpcTool::CallMethod(int argc, const char** argv,
       "    --binary_output          ; Output in binary format\n"
       "    --json_input             ; Input in json format\n"
       "    --json_output            ; Output in json format\n"
+      "    --max_recv_msg_size      ; Specify max receive message size in "
+      "bytes. -1 indicates unlimited. The default value of 0 means to use the "
+      "gRPC default.\n"
       "    --timeout                ; Specify timeout (in seconds), used to "
       "set the deadline for RPCs. The default value of -1 means no "
       "deadline has been set.\n" +
@@ -520,12 +546,16 @@ bool GrpcTool::CallMethod(int argc, const char** argv,
   cli_args.timeout = absl::GetFlag(FLAGS_timeout);
   bool print_mode = false;
 
+  grpc::ChannelArguments args;
+  if (absl::GetFlag(FLAGS_max_recv_msg_size) != 0) {
+    args.SetMaxReceiveMessageSize(absl::GetFlag(FLAGS_max_recv_msg_size));
+  }
   std::shared_ptr<grpc::Channel> channel =
-      CreateCliChannel(server_address, cred);
+      CreateCliChannel(server_address, cred, args);
 
   if (!absl::GetFlag(FLAGS_binary_input) ||
       !absl::GetFlag(FLAGS_binary_output)) {
-    parser = absl::make_unique<grpc::testing::ProtoFileParser>(
+    parser = std::make_unique<grpc::testing::ProtoFileParser>(
         absl::GetFlag(FLAGS_remotedb) ? channel : nullptr,
         absl::GetFlag(FLAGS_proto_path), absl::GetFlag(FLAGS_protofiles));
     if (parser->HasError()) {
@@ -550,7 +580,8 @@ bool GrpcTool::CallMethod(int argc, const char** argv,
     request_text = argv[2];
   }
 
-  if (parser->IsStreaming(method_name, true /* is_request */)) {
+  if (parser != nullptr &&
+      parser->IsStreaming(method_name, true /* is_request */)) {
     std::istream* input_stream;
     std::ifstream input_file;
 
@@ -578,6 +609,12 @@ bool GrpcTool::CallMethod(int argc, const char** argv,
     } else {
       input_file.open(absl::GetFlag(FLAGS_infile),
                       std::ios::in | std::ios::binary);
+      if (!input_file) {
+        fprintf(stderr, "Failed to open infile %s.\n",
+                absl::GetFlag(FLAGS_infile).c_str());
+        return false;
+      }
+
       input_stream = &input_file;
     }
 
@@ -615,7 +652,7 @@ bool GrpcTool::CallMethod(int argc, const char** argv,
           fprintf(stderr, "Request sent.\n");
         }
       } else {
-        if (line.length() == 0) {
+        if (line.empty()) {
           request_text = request_ss.str();
           request_ss.str(std::string());
           request_ss.clear();
@@ -648,7 +685,8 @@ bool GrpcTool::CallMethod(int argc, const char** argv,
 
   } else {  // parser->IsStreaming(method_name, true /* is_request */)
     if (absl::GetFlag(FLAGS_batch)) {
-      if (parser->IsStreaming(method_name, false /* is_request */)) {
+      if (parser != nullptr &&
+          parser->IsStreaming(method_name, false /* is_request */)) {
         fprintf(stderr, "Batch mode for streaming RPC is not supported.\n");
         return false;
       }
@@ -747,7 +785,7 @@ bool GrpcTool::CallMethod(int argc, const char** argv,
             }
           }
         } else {
-          if (line.length() == 0) {
+          if (line.empty()) {
             request_text = request_ss.str();
             request_ss.str(std::string());
             request_ss.clear();
@@ -904,8 +942,8 @@ bool GrpcTool::ParseMessage(int argc, const char** argv,
   if (!absl::GetFlag(FLAGS_binary_input) ||
       !absl::GetFlag(FLAGS_binary_output)) {
     std::shared_ptr<grpc::Channel> channel =
-        CreateCliChannel(server_address, cred);
-    parser = absl::make_unique<grpc::testing::ProtoFileParser>(
+        CreateCliChannel(server_address, cred, grpc::ChannelArguments());
+    parser = std::make_unique<grpc::testing::ProtoFileParser>(
         absl::GetFlag(FLAGS_remotedb) ? channel : nullptr,
         absl::GetFlag(FLAGS_proto_path), absl::GetFlag(FLAGS_protofiles));
     if (parser->HasError()) {

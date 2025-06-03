@@ -28,7 +28,7 @@ python server.py
 1. Set up xDS configuration.
 
 After configuring your xDS server to track the gRPC server we just started,
-create a bootstrap file as desribed in [gRFC A27](https://github.com/grpc/proposal/blob/master/A27-xds-global-load-balancing.md):
+create a bootstrap file as described in [gRFC A27](https://github.com/grpc/proposal/blob/master/A27-xds-global-load-balancing.md):
 
 ```
 {
@@ -121,3 +121,20 @@ Add the `--secure true` flag to the invocation outlined above.
 ```
 python client.py xds:///my-backend --secure true
 ```
+
+## Building Docker
+
+From the gRPC workspace folder:
+
+Client:
+```
+docker build -f examples/python/xds/Dockerfile.client -t "${xds-example-python-client-tag}" .
+```
+
+Server:
+```
+docker build -f examples/python/xds/Dockerfile.server -t "${xds-example-python-server-tag}" .
+```
+
+And then push the tagged image using `docker push`.
+

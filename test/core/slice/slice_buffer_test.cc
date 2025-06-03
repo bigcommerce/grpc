@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <grpc/support/port_platform.h>
-
 #include "src/core/lib/slice/slice_buffer.h"
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
+#include <grpc/slice.h>
+#include <grpc/support/alloc.h>
+#include <grpc/support/port_platform.h>
+#include <string.h>
 
-#include <grpc/event_engine/slice_buffer.h>
-#include <grpc/grpc.h>
+#include <memory>
+#include <utility>
 
+#include "absl/log/check.h"
+#include "gtest/gtest.h"
 #include "src/core/lib/slice/slice.h"
-#include "test/core/util/test_config.h"
 
 using ::grpc_core::Slice;
 using ::grpc_core::SliceBuffer;
@@ -31,7 +32,7 @@ using ::grpc_core::SliceBuffer;
 static constexpr int kNewSliceLength = 100;
 
 Slice MakeSlice(size_t len) {
-  GPR_ASSERT(len > 0);
+  CHECK_GT(len, 0);
   unsigned char* contents = static_cast<unsigned char*>(gpr_malloc(len));
   memset(contents, 'a', len);
   return Slice(grpc_slice_new(contents, len, gpr_free));

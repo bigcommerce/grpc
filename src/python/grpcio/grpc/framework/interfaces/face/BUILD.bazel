@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+load("@rules_python//python:defs.bzl", "py_library")
+
 package(default_visibility = ["//visibility:public"])
 
 py_library(
@@ -26,13 +28,9 @@ py_library(
     name = "face_lib",
     srcs = ["face.py"],
     deps = [
-        "//src/python/grpcio/grpc/framework/foundation",
         "//src/python/grpcio/grpc/framework/common",
-        "@six//:six",
-    ] + select({
-        "//conditions:default": ["@enum34//:enum34"],
-        "//:python3": [],
-    }),
+        "//src/python/grpcio/grpc/framework/foundation",
+    ],
 )
 
 py_library(

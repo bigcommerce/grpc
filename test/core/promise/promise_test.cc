@@ -14,7 +14,12 @@
 
 #include "src/core/lib/promise/promise.h"
 
+#include <memory>
+#include <utility>
+
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "src/core/util/json/json_writer.h"
 
 namespace grpc_core {
 
@@ -25,14 +30,28 @@ TEST(PromiseTest, Works) {
 
 TEST(PromiseTest, Immediate) { EXPECT_EQ(Immediate(42)(), Poll<int>(42)); }
 
-TEST(PromiseTest, WithResult) {
-  EXPECT_EQ(WithResult<int>(Immediate(42))(), Poll<int>(42));
-  // Fails to compile: WithResult<int>(Immediate(std::string("hello")));
-  // Fails to compile: WithResult<int>(Immediate(42.9));
+TEST(PromiseTest, AssertResultType) {
+  EXPECT_EQ(AssertResultType<int>(Immediate(42))(), Poll<int>(42));
+  // Fails to compile: AssertResultType<int>(Immediate(std::string("hello")));
+  // Fails to compile: AssertResultType<int>(Immediate(42.9));
 }
 
 TEST(PromiseTest, NowOrNever) {
-  EXPECT_EQ(NowOrNever(Immediate(42)), absl::optional<int>(42));
+  EXPECT_EQ(NowOrNever(Immediate(42)), std::optional<int>(42));
+}
+
+TEST(PromiseTest, CanConvertToJson) {
+  auto x = []() { return 42; };
+  EXPECT_FALSE(promise_detail::kHasToJsonMethod<decltype(x)>);
+}
+
+TEST(PromiseTest, CanCustomizeJsonConversion) {
+  class FooPromise {
+   public:
+    Json ToJson() const { return Json::FromObject(Json::Object()); }
+  };
+  EXPECT_TRUE(promise_detail::kHasToJsonMethod<FooPromise>);
+  EXPECT_EQ(JsonDump(PromiseAsJson(FooPromise())), "{}");
 }
 
 }  // namespace grpc_core

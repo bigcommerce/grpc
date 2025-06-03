@@ -1,31 +1,22 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <climits>
-#include <iostream>
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
-#include "absl/types/optional.h"
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include <grpc/grpc.h>
-#include <grpc/support/log.h>
 #include <grpc/support/time.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/client_context.h>
@@ -36,17 +27,20 @@
 #include <grpcpp/test/default_reactor_test_peer.h>
 #include <grpcpp/test/mock_stream.h>
 
+#include <climits>
+#include <iostream>
+#include <optional>
+
+#include "absl/log/log.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+#include "src/core/util/crash.h"
 #include "src/proto/grpc/testing/duplicate/echo_duplicate.grpc.pb.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "src/proto/grpc/testing/echo_mock.grpc.pb.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 
-using grpc::testing::DefaultReactorTestPeer;
-using grpc::testing::EchoRequest;
-using grpc::testing::EchoResponse;
-using grpc::testing::EchoTestService;
-using grpc::testing::MockClientReaderWriter;
 using std::vector;
 using ::testing::_;
 using ::testing::AtLeast;
@@ -109,7 +103,7 @@ class FakeClient {
     std::unique_ptr<ClientReaderInterface<EchoResponse>> cstream =
         stub_->ResponseStream(&context, request);
 
-    std::string exp = "";
+    std::string exp;
     EXPECT_TRUE(cstream->Read(&response));
     exp.append(response.message() + " ");
 
@@ -171,7 +165,7 @@ class CallbackTestServiceImpl : public EchoTestService::CallbackService {
     // adding this variance in Status return value just to improve coverage in
     // this test.
     auto* reactor = context->DefaultReactor();
-    if (request->message().length() > 0) {
+    if (!request->message().empty()) {
       response->set_message(request->message());
       reactor->Finish(Status::OK);
     } else {
@@ -194,7 +188,7 @@ TEST_F(MockCallbackTest, MockedCallSucceedsWithWait) {
   struct {
     grpc::internal::Mutex mu;
     grpc::internal::CondVar cv;
-    absl::optional<grpc::Status> ABSL_GUARDED_BY(mu) status;
+    std::optional<grpc::Status> ABSL_GUARDED_BY(mu) status;
   } status;
   DefaultReactorTestPeer peer(&ctx, [&](grpc::Status s) {
     grpc::internal::MutexLock l(&status.mu);
@@ -255,9 +249,9 @@ class TestServiceImpl : public EchoTestService::Service {
                        ServerReader<EchoRequest>* reader,
                        EchoResponse* response) override {
     EchoRequest request;
-    std::string resp("");
+    std::string resp;
     while (reader->Read(&request)) {
-      gpr_log(GPR_INFO, "recv msg %s", request.message().c_str());
+      LOG(INFO) << "recv msg " << request.message();
       resp.append(request.message());
     }
     response->set_message(resp);
@@ -281,7 +275,7 @@ class TestServiceImpl : public EchoTestService::Service {
     EchoRequest request;
     EchoResponse response;
     while (stream->Read(&request)) {
-      gpr_log(GPR_INFO, "recv msg %s", request.message().c_str());
+      LOG(INFO) << "recv msg " << request.message();
       response.set_message(request.message());
       stream->Write(response);
     }
@@ -290,7 +284,7 @@ class TestServiceImpl : public EchoTestService::Service {
 
  private:
   vector<std::string> split(const std::string& input) {
-    std::string buff("");
+    std::string buff;
     vector<std::string> result;
 
     for (auto n : input) {

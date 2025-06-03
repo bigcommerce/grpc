@@ -24,8 +24,6 @@ There are multiple polling engine implementations depending on the OS and the OS
   - `poll` (If kernel does not have epoll support)
 - Mac: **`poll`** (default)
 - Windows: (no name)
-- One-off polling engines:
-  - NodeJS : `libuv` polling engine implementation (requires different compile `#define`s)
 
 ## Polling Engine Interface
 
@@ -96,18 +94,18 @@ The following are the **Opaque** structures exposed by Polling Engine interface 
 
 __Relation between grpc_pollset_worker, grpc_pollset and grpc_fd:__
 
-![image](../images/grpc-ps-pss-fd.png)
+![image](/doc/images/grpc-ps-pss-fd.png)
 
 __grpc_pollset_set__
 
-![image](../images/grpc-pss.png)
+![image](/doc/images/grpc-pss.png)
 
 
 ## Polling Engine Implementations
 
 ### epoll1
 
-![image](../images/grpc-epoll1.png)
+![image](/doc/images/grpc-epoll1.png)
 
 Code at `src/core/lib/iomgr/ev_epoll1_posix.cc`
 

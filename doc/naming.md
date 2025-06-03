@@ -34,12 +34,12 @@ Most gRPC implementations support the following URI schemes:
     resolver does not support this, but the c-ares based resolver
     supports specifying this in the form "IP:port".)
 
-- `unix:path`, `unix://absolute_path` -- Unix domain sockets (Unix systems only)
+- `unix:path`, `unix:///absolute_path` -- Unix domain sockets (Unix systems only)
   - `path` indicates the location of the desired socket.
   - In the first form, the path may be relative or absolute; in the
-    second form, the path must be absolute (i.e., there will actually be
-    three slashes, two prior to the path and another to begin the
-    absolute path).
+    second form, the path must be absolute (i.e., the last of the three
+    slashes is actually part of the path, so the path part of the URI is
+    `/absolute_path`).
 
 - `unix-abstract:abstract_path` -- Unix domain socket in abstract namespace (Unix systems only)
   - `abstract_path` indicates a name in the abstract namespace.
@@ -48,6 +48,12 @@ Most gRPC implementations support the following URI schemes:
   - The underlying implementation of Abstract sockets uses a null byte ('\0')
     as the first character; the implementation will prepend this null. Do not include
     the null in `abstract_path`.
+
+- `vsock:cid:port` -- VSOCK (Linux systems only)
+  - `cid` is 32-bit Context Identifier (CID). It indicates the source or
+    destination, which is either a virtual machine or the host.
+  - `port` is a 32-bit port number. It differentiates between multiple
+    services running on a single machine.
 
 The following schemes are supported by the gRPC C-core implementation,
 but may not be supported in other languages:

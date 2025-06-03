@@ -1,35 +1,33 @@
-/*
- *
- * Copyright 2018 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
-
-#include <grpc/impl/codegen/port_platform.h>
+//
+//
+// Copyright 2018 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
 #include "src/cpp/server/load_reporter/load_data_store.h"
+
+#include <grpc/grpc.h>
+#include <grpc/support/port_platform.h>
 
 #include <set>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include <grpc/grpc.h>
-
+#include "gtest/gtest.h"
 #include "src/cpp/server/load_reporter/constants.h"
-#include "test/core/util/port.h"
-#include "test/core/util/test_config.h"
+#include "test/core/test_util/port.h"
+#include "test/core/test_util/test_config.h"
 
 namespace grpc {
 namespace testing {
@@ -134,7 +132,7 @@ TEST_F(LoadDataStoreTest, ReassignOrphanStores) {
   auto assigned_to_lb_id_4 =
       load_data_store.GetAssignedStores(kHostname2, kLbId4);
   // There is no active LB for the first host now. kLbId4 is active but
-  // it's for the second host, so it wll NOT adopt the orphaned stores.
+  // it's for the second host, so it will NOT adopt the orphaned stores.
   EXPECT_FALSE(PerBalancerStoresContains(load_data_store, assigned_to_lb_id_4,
                                          kHostname1, kLbId1, kLoadKey1));
   EXPECT_FALSE(PerBalancerStoresContains(load_data_store, assigned_to_lb_id_4,
@@ -157,7 +155,7 @@ TEST_F(LoadDataStoreTest, OrphanAssignmentIsSticky) {
   load_data_store.ReportStreamClosed(kHostname1, orphaned_lb_id);
   active_lb_ids.erase(orphaned_lb_id);
   // Find which LB is assigned the orphaned store.
-  std::string assigned_lb_id = "";
+  std::string assigned_lb_id;
   for (const auto& lb_id : active_lb_ids) {
     if (PerBalancerStoresContains(
             load_data_store,
@@ -171,7 +169,7 @@ TEST_F(LoadDataStoreTest, OrphanAssignmentIsSticky) {
   // Close 10 more stream, skipping the assigned_lb_id. The assignment of
   // orphaned_lb_id shouldn't change.
   for (size_t _ = 0; _ < 10; ++_) {
-    std::string lb_id_to_close = "";
+    std::string lb_id_to_close;
     for (const auto& lb_id : active_lb_ids) {
       if (lb_id != assigned_lb_id) {
         lb_id_to_close = lb_id;
@@ -189,16 +187,16 @@ TEST_F(LoadDataStoreTest, OrphanAssignmentIsSticky) {
   // Close the assigned_lb_id, orphaned_lb_id will be re-assigned again.
   load_data_store.ReportStreamClosed(kHostname1, assigned_lb_id);
   active_lb_ids.erase(assigned_lb_id);
-  size_t orphaned_lb_id_occurences = 0;
+  size_t orphaned_lb_id_occurrences = 0;
   for (const auto& lb_id : active_lb_ids) {
     if (PerBalancerStoresContains(
             load_data_store,
             load_data_store.GetAssignedStores(kHostname1, lb_id), kHostname1,
             orphaned_lb_id, kLoadKey1)) {
-      orphaned_lb_id_occurences++;
+      orphaned_lb_id_occurrences++;
     }
   }
-  EXPECT_EQ(orphaned_lb_id_occurences, 1U);
+  EXPECT_EQ(orphaned_lb_id_occurrences, 1U);
 }
 
 TEST_F(LoadDataStoreTest, HostTemporarilyLoseAllStreams) {

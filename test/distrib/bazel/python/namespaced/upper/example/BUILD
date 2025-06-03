@@ -14,12 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@rules_proto//proto:defs.bzl", "proto_library")
 load(
     "@com_github_grpc_grpc//bazel:python_rules.bzl",
     "py_grpc_library",
     "py_proto_library",
 )
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_python//python:defs.bzl", "py_test")
 
 _IMPORT_PREFIX = "foo/bar"
 
@@ -112,16 +113,16 @@ py_grpc_library(
 # in the following directory layout for python, which needs to properly be added to the imports.
 #
 # No Import or Strip (Can't compile if there are any proto dependencies)
-# bazel-out/darwin-fastbuild/bin/namespaced/upper/example/namespaced_example_pb2.py
+# bazel-bin/namespaced/upper/example/namespaced_example_pb2.py
 #
 # No import Prefix (Can't compile if there are any proto dependencies)
-# bazel-out/darwin-fastbuild/bin/namespaced/upper/example/_virtual_imports/namespaced_example_proto/namespaced_example_pb2.py
+# bazel-bin/namespaced/upper/example/_virtual_imports/namespaced_example_proto/namespaced_example_pb2.py
 #
 # No strip prefix (Can't compile if there are any proto dependencies)
-# bazel-out/darwin-fastbuild/bin/namespaced/upper/example/_virtual_imports/namespaced_example_proto/upper/example/namespaced/upper/example/namespaced_example_pb2.py
+# bazel-bin/namespaced/upper/example/_virtual_imports/namespaced_example_proto/upper/example/namespaced/upper/example/namespaced_example_pb2.py
 #
 # Both Import and Strip
-# bazel-out/darwin-fastbuild/bin/namespaced/upper/example/_virtual_imports/namespaced_example_proto/upper/example/namespaced_example_pb2.py
+# bazel-bin/namespaced/upper/example/_virtual_imports/namespaced_example_proto/upper/example/namespaced_example_pb2.py
 
 py_test(
     name = "import_no_strip_test",

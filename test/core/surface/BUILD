@@ -21,51 +21,72 @@ grpc_package(name = "test/core/surface")
 grpc_cc_test(
     name = "grpc_byte_buffer_reader_test",
     srcs = ["byte_buffer_reader_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
+    ],
+)
+
+grpc_cc_test(
+    name = "channel_init_test",
+    srcs = ["channel_init_test.cc"],
+    external_deps = ["gtest"],
+    uses_event_engine = False,
+    uses_polling = False,
+    deps = [
+        "//:gpr",
+        "//:grpc",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "grpc_completion_queue_test",
     srcs = ["completion_queue_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "completion_queue_threading_test",
     srcs = ["completion_queue_threading_test.cc"],
-    external_deps = ["gtest"],
-    flaky = True,  # TODO(b/153064668)
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "concurrent_connectivity_test",
     srcs = ["concurrent_connectivity_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//src/core:closure",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -75,13 +96,12 @@ grpc_cc_test(
     external_deps = [
         "gtest",
     ],
-    language = "C++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -89,12 +109,13 @@ grpc_cc_test(
     name = "lame_client_test",
     srcs = ["lame_client_test.cc"],
     external_deps = ["gtest"],
-    language = "C++",
+    tags = ["lame_client_test"],
     deps = [
         "//:gpr",
         "//:grpc",
+        "//src/core:closure",
         "//test/core/end2end:cq_verifier",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -104,24 +125,15 @@ grpc_cc_test(
     data = [
         "//src/core/tsi/test_creds:ca.pem",
     ],
-    external_deps = ["gtest"],
-    language = "C++",
-    deps = [
-        "//:gpr",
-        "//:grpc",
-        "//test/core/util:grpc_test_util",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
     ],
-)
-
-grpc_cc_test(
-    name = "public_headers_must_be_c89",
-    srcs = ["public_headers_must_be_c89.c"],
-    language = "C",
     deps = [
         "//:gpr",
         "//:grpc",
-        "//:grpc_authorization_provider",
-        "//test/core/util:grpc_test_util",
+        "//src/core:channel_args",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -129,11 +141,10 @@ grpc_cc_test(
     name = "secure_channel_create_test",
     srcs = ["secure_channel_create_test.cc"],
     external_deps = ["gtest"],
-    language = "C++",
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -145,13 +156,15 @@ grpc_cc_test(
         "//src/core/tsi/test_creds:server1.key",
         "//src/core/tsi/test_creds:server1.pem",
     ],
-    external_deps = ["gtest"],
-    flaky = True,  # TODO(b/151696318)
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//src/core:channel_args",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -161,22 +174,44 @@ grpc_cc_test(
     external_deps = [
         "gtest",
     ],
-    language = "C++",
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//src/core:channel_args",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
 grpc_cc_test(
     name = "server_test",
     srcs = ["server_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//src/core:channel_args",
+        "//test/core/test_util:grpc_test_util",
+    ],
+)
+
+grpc_cc_test(
+    name = "connection_context_test",
+    srcs = ["connection_context_test.cc"],
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
+    uses_event_engine = False,
+    uses_polling = False,
+    deps = [
+        "//:gpr",
+        "//:grpc",
+        "//:orphanable",
+        "//src/core:connection_context",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )

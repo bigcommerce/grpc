@@ -126,7 +126,7 @@ namespace Grpc.Tools
                                                         "javanano", "js", "objc",
                                                         "php", "python", "ruby" };
 
-        static readonly TimeSpan s_regexTimeout = TimeSpan.FromMilliseconds(100);
+        static readonly TimeSpan s_regexTimeout = TimeSpan.FromSeconds(1);
 
         static readonly List<ErrorListFilter> s_errorListFilters = new List<ErrorListFilter>()
         {
@@ -203,6 +203,63 @@ namespace Grpc.Tools
                         endLineNumber: 0,
                         endColumnNumber: 0,
                         message: match.Groups["TEXT"].Value);
+                }
+            },
+
+            // Example warning from plugins that use GOOGLE_LOG
+            // [libprotobuf WARNING T:\altsrc\..\csharp_enum.cc:74] Duplicate enum value Work (originally Work) in PhoneType; adding underscore to distinguish
+            new ErrorListFilter
+            {
+                Pattern = new Regex(
+                    pattern: "^\\[.+? WARNING (?'FILENAME'.+?):(?'LINE'\\d+?)\\] ?(?'TEXT'.*)",
+                    options: RegexOptions.Compiled | RegexOptions.IgnoreCase,
+                    matchTimeout: s_regexTimeout),
+                LogAction = (log, match) =>
+                {
+                    // The filename and line logged by the plugins may not be useful to the
+                    // end user as they are not the location in the proto file but rather
+                    // in the source code for the plugin. Log them anyway as they may help in
+                    // diagnostics.
+                    int.TryParse(match.Groups["LINE"].Value, out var line);
+                    log.LogWarning(
+                        subcategory: null,
+                        warningCode: null,
+                        helpKeyword: null,
+                        file: match.Groups["FILENAME"].Value,
+                        lineNumber: line,
+                        columnNumber: 0,
+                        endLineNumber: 0,
+                        endColumnNumber: 0,
+                        message: match.Groups["TEXT"].Value);
+                }
+            },
+
+            // Example error from plugins that use GOOGLE_LOG
+            // [libprotobuf ERROR T:\path\...\filename:23] Some message
+            // [libprotobuf FATAL T:\path\...\filename:23] Some message
+            new ErrorListFilter
+            {
+                Pattern = new Regex(
+                    pattern: "^\\[.+? (?'LEVEL'ERROR|FATAL) (?'FILENAME'.+?):(?'LINE'\\d+?)\\] ?(?'TEXT'.*)",
+                    options: RegexOptions.Compiled | RegexOptions.IgnoreCase,
+                    matchTimeout: s_regexTimeout),
+                LogAction = (log, match) =>
+                {
+                    // The filename and line logged by the plugins may not be useful to the
+                    // end user as they are not the location in the proto file but rather
+                    // in the source code for the plugin. Log them anyway as they may help in
+                    // diagnostics.
+                    int.TryParse(match.Groups["LINE"].Value, out var line);
+                    log.LogError(
+                        subcategory: null,
+                        errorCode: null,
+                        helpKeyword: null,
+                        file: match.Groups["FILENAME"].Value,
+                        lineNumber: line,
+                        columnNumber: 0,
+                        endLineNumber: 0,
+                        endColumnNumber: 0,
+                        message: match.Groups["LEVEL"].Value + " " + match.Groups["TEXT"].Value);
                 }
             },
 
@@ -534,12 +591,18 @@ namespace Grpc.Tools
         {
             foreach (ErrorListFilter filter in s_errorListFilters)
             {
-                Match match = filter.Pattern.Match(singleLine);
-
-                if (match.Success)
+                try
                 {
-                    filter.LogAction(Log, match);
-                    return;
+                    Match match = filter.Pattern.Match(singleLine);
+
+                    if (match.Success)
+                    {
+                        filter.LogAction(Log, match);
+                        return;
+                    }
+                } catch (RegexMatchTimeoutException)
+                {
+                    Log.LogWarning("Unable to parse output from protoc. Regex timeout.");
                 }
             }
 

@@ -1,20 +1,26 @@
-/*
- *
- * Copyright 2015 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
+
+#include <grpc/grpc.h>
+#include <grpc/support/cpu.h>
+#include <grpcpp/alarm.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
 
 #include <list>
 #include <memory>
@@ -25,15 +31,9 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/memory/memory.h"
-
-#include <grpc/grpc.h>
-#include <grpc/support/cpu.h>
-#include <grpc/support/log.h>
-#include <grpcpp/alarm.h>
-#include <grpcpp/channel.h>
-#include <grpcpp/client_context.h>
-
+#include "src/core/util/crash.h"
 #include "src/proto/grpc/testing/benchmark_service.grpc.pb.h"
 #include "test/cpp/qps/client.h"
 #include "test/cpp/qps/usage_timer.h"
@@ -41,9 +41,9 @@
 namespace grpc {
 namespace testing {
 
-/**
- * Maintains context info per RPC
- */
+///
+/// Maintains context info per RPC
+///
 struct CallbackClientRpcContext {
   explicit CallbackClientRpcContext(BenchmarkService::Stub* stub)
       : alarm_(nullptr), stub_(stub) {}
@@ -79,12 +79,12 @@ class CallbackClient
 
   ~CallbackClient() override {}
 
-  /**
-   * The main thread of the benchmark will be waiting on DestroyMultithreading.
-   * Increment the rpcs_done_ variable to signify that the Callback RPC
-   * after thread completion is done. When the last outstanding rpc increments
-   * the counter it should also signal the main thread's conditional variable.
-   */
+  ///
+  /// The main thread of the benchmark will be waiting on DestroyMultithreading.
+  /// Increment the rpcs_done_ variable to signify that the Callback RPC
+  /// after thread completion is done. When the last outstanding rpc increments
+  /// the counter it should also signal the main thread's conditional variable.
+  ///
   void NotifyMainThreadOfThreadCompletion() {
     std::lock_guard<std::mutex> l(shutdown_mu_);
     rpcs_done_++;
@@ -125,14 +125,14 @@ class CallbackClient
     int num_threads = config.async_client_threads();
     if (num_threads <= 0) {  // Use dynamic sizing
       num_threads = cores_;
-      gpr_log(GPR_INFO, "Sizing callback client to %d threads", num_threads);
+      LOG(INFO) << "Sizing callback client to " << num_threads << " threads";
     }
     return num_threads;
   }
 
-  /**
-   * Wait until all outstanding Callback RPCs are done
-   */
+  ///
+  /// Wait until all outstanding Callback RPCs are done
+  ///
   void DestroyMultithreading() final {
     std::unique_lock<std::mutex> l(shutdown_mu_);
     while (rpcs_done_ != total_outstanding_rpcs_) {
@@ -174,7 +174,7 @@ class CallbackUnaryClient final : public CallbackClient {
       // Start an alarm callback to run the internal callback after
       // next_issue_time
       if (ctx_[vector_idx]->alarm_ == nullptr) {
-        ctx_[vector_idx]->alarm_ = absl::make_unique<Alarm>();
+        ctx_[vector_idx]->alarm_ = std::make_unique<Alarm>();
       }
       ctx_[vector_idx]->alarm_->Set(next_issue_time,
                                     [this, t, vector_idx](bool /*ok*/) {
@@ -186,7 +186,6 @@ class CallbackUnaryClient final : public CallbackClient {
   }
 
   void IssueUnaryCallbackRpc(Thread* t, size_t vector_idx) {
-    GPR_TIMER_SCOPE("CallbackUnaryClient::ThreadFunc", 0);
     double start = UsageTimer::Now();
     ctx_[vector_idx]->stub_->async()->UnaryCall(
         (&ctx_[vector_idx]->context_), &request_, &ctx_[vector_idx]->response_,
@@ -204,7 +203,7 @@ class CallbackUnaryClient final : public CallbackClient {
             NotifyMainThreadOfThreadCompletion();
           } else {
             // Reallocate ctx for next RPC
-            ctx_[vector_idx] = absl::make_unique<CallbackClientRpcContext>(
+            ctx_[vector_idx] = std::make_unique<CallbackClientRpcContext>(
                 ctx_[vector_idx]->stub_);
             // Schedule a new RPC
             ScheduleRpc(t, vector_idx);
@@ -268,7 +267,7 @@ class CallbackStreamingPingPongReactor final
 
   void OnWriteDone(bool ok) override {
     if (!ok) {
-      gpr_log(GPR_ERROR, "Error writing RPC");
+      LOG(ERROR) << "Error writing RPC";
     }
     if ((!ok || client_->ThreadCompleted()) &&
         !writes_done_started_.test_and_set()) {
@@ -284,7 +283,7 @@ class CallbackStreamingPingPongReactor final
         (client_->messages_per_stream() != 0 &&
          ++messages_issued_ >= client_->messages_per_stream())) {
       if (!ok) {
-        gpr_log(GPR_ERROR, "Error reading RPC");
+        LOG(ERROR) << "Error reading RPC";
       }
       if (!writes_done_started_.test_and_set()) {
         StartWritesDone();
@@ -310,7 +309,7 @@ class CallbackStreamingPingPongReactor final
       client_->NotifyMainThreadOfThreadCompletion();
       return;
     }
-    ctx_ = absl::make_unique<CallbackClientRpcContext>(ctx_->stub_);
+    ctx_ = std::make_unique<CallbackClientRpcContext>(ctx_->stub_);
     ScheduleRpc();
   }
 
@@ -320,7 +319,7 @@ class CallbackStreamingPingPongReactor final
       // Start an alarm callback to run the internal callback after
       // next_issue_time
       if (ctx_->alarm_ == nullptr) {
-        ctx_->alarm_ = absl::make_unique<Alarm>();
+        ctx_->alarm_ = std::make_unique<Alarm>();
       }
       ctx_->alarm_->Set(next_issue_time,
                         [this](bool /*ok*/) { StartNewRpc(); });
@@ -378,11 +377,11 @@ std::unique_ptr<Client> CreateCallbackClient(const ClientConfig& config) {
     case STREAMING_FROM_CLIENT:
     case STREAMING_FROM_SERVER:
     case STREAMING_BOTH_WAYS:
-      assert(false);
-      return nullptr;
+      grpc_core::Crash(
+          "STREAMING_FROM_* scenarios are not supported by the callback "
+          "API");
     default:
-      assert(false);
-      return nullptr;
+      grpc_core::Crash(absl::StrCat("Unknown RPC type: ", config.rpc_type()));
   }
 }
 

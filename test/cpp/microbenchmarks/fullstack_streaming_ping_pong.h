@@ -1,31 +1,31 @@
-/*
- *
- * Copyright 2016 gRPC authors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+//
+//
+// Copyright 2016 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//
 
-/* Benchmark gRPC end2end in various configurations */
+// Benchmark gRPC end2end in various configurations
 
-#ifndef TEST_CPP_MICROBENCHMARKS_FULLSTACK_STREAMING_PING_PONG_H
-#define TEST_CPP_MICROBENCHMARKS_FULLSTACK_STREAMING_PING_PONG_H
-
-#include <sstream>
+#ifndef GRPC_TEST_CPP_MICROBENCHMARKS_FULLSTACK_STREAMING_PING_PONG_H
+#define GRPC_TEST_CPP_MICROBENCHMARKS_FULLSTACK_STREAMING_PING_PONG_H
 
 #include <benchmark/benchmark.h>
 
-#include "src/core/lib/profiling/timers.h"
+#include <sstream>
+
+#include "absl/log/check.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "test/cpp/microbenchmarks/fullstack_context_mutators.h"
 #include "test/cpp/microbenchmarks/fullstack_fixtures.h"
@@ -33,16 +33,16 @@
 namespace grpc {
 namespace testing {
 
-/*******************************************************************************
- * BENCHMARKING KERNELS
- */
+//******************************************************************************
+// BENCHMARKING KERNELS
+//
 
 static void* tag(intptr_t x) { return reinterpret_cast<void*>(x); }
 
 // Repeatedly makes Streaming Bidi calls (exchanging a configurable number of
 // messages in each call) in a loop on a single channel
 //
-//  First parmeter (i.e state.range(0)):  Message size (in bytes) to use
+//  First parameter (i.e state.range(0)):  Message size (in bytes) to use
 //  Second parameter (i.e state.range(1)): Number of ping pong messages.
 //      Note: One ping-pong means two messages (one from client to server and
 //      the other from server to client):
@@ -83,10 +83,10 @@ static void BM_StreamingPingPong(benchmark::State& state) {
       bool ok;
       int need_tags = (1 << 0) | (1 << 1);
       while (need_tags) {
-        GPR_ASSERT(fixture->cq()->Next(&t, &ok));
-        GPR_ASSERT(ok);
+        CHECK(fixture->cq()->Next(&t, &ok));
+        CHECK(ok);
         int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
-        GPR_ASSERT(need_tags & (1 << i));
+        CHECK(need_tags & (1 << i));
         need_tags &= ~(1 << i);
       }
 
@@ -99,8 +99,8 @@ static void BM_StreamingPingPong(benchmark::State& state) {
 
         need_tags = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3);
         while (need_tags) {
-          GPR_ASSERT(fixture->cq()->Next(&t, &ok));
-          GPR_ASSERT(ok);
+          CHECK(fixture->cq()->Next(&t, &ok));
+          CHECK(ok);
           int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
 
           // If server recv is complete, start the server send operation
@@ -108,7 +108,7 @@ static void BM_StreamingPingPong(benchmark::State& state) {
             response_rw.Write(send_response, tag(3));
           }
 
-          GPR_ASSERT(need_tags & (1 << i));
+          CHECK(need_tags & (1 << i));
           need_tags &= ~(1 << i);
         }
 
@@ -123,23 +123,22 @@ static void BM_StreamingPingPong(benchmark::State& state) {
 
       need_tags = (1 << 0) | (1 << 1) | (1 << 2);
       while (need_tags) {
-        GPR_ASSERT(fixture->cq()->Next(&t, &ok));
+        CHECK(fixture->cq()->Next(&t, &ok));
         int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
-        GPR_ASSERT(need_tags & (1 << i));
+        CHECK(need_tags & (1 << i));
         need_tags &= ~(1 << i);
       }
 
-      GPR_ASSERT(recv_status.ok());
+      CHECK(recv_status.ok());
     }
   }
 
-  fixture->Finish(state);
   fixture.reset();
   state.SetBytesProcessed(msg_size * state.iterations() * max_ping_pongs * 2);
 }
 
 // Repeatedly sends ping pong messages in a single streaming Bidi call in a loop
-//     First parmeter (i.e state.range(0)):  Message size (in bytes) to use
+//     First parameter (i.e state.range(0)):  Message size (in bytes) to use
 template <class Fixture, class ClientContextMutator, class ServerContextMutator>
 static void BM_StreamingPingPongMsgs(benchmark::State& state) {
   const int msg_size = state.range(0);
@@ -175,23 +174,22 @@ static void BM_StreamingPingPongMsgs(benchmark::State& state) {
     bool ok;
     int need_tags = (1 << 0) | (1 << 1);
     while (need_tags) {
-      GPR_ASSERT(fixture->cq()->Next(&t, &ok));
-      GPR_ASSERT(ok);
+      CHECK(fixture->cq()->Next(&t, &ok));
+      CHECK(ok);
       int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
-      GPR_ASSERT(need_tags & (1 << i));
+      CHECK(need_tags & (1 << i));
       need_tags &= ~(1 << i);
     }
 
     for (auto _ : state) {
-      GPR_TIMER_SCOPE("BenchmarkCycle", 0);
       request_rw->Write(send_request, tag(0));   // Start client send
       response_rw.Read(&recv_request, tag(1));   // Start server recv
       request_rw->Read(&recv_response, tag(2));  // Start client recv
 
       need_tags = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3);
       while (need_tags) {
-        GPR_ASSERT(fixture->cq()->Next(&t, &ok));
-        GPR_ASSERT(ok);
+        CHECK(fixture->cq()->Next(&t, &ok));
+        CHECK(ok);
         int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
 
         // If server recv is complete, start the server send operation
@@ -199,7 +197,7 @@ static void BM_StreamingPingPongMsgs(benchmark::State& state) {
           response_rw.Write(send_response, tag(3));
         }
 
-        GPR_ASSERT(need_tags & (1 << i));
+        CHECK(need_tags & (1 << i));
         need_tags &= ~(1 << i);
       }
     }
@@ -211,16 +209,15 @@ static void BM_StreamingPingPongMsgs(benchmark::State& state) {
 
     need_tags = (1 << 0) | (1 << 1) | (1 << 2);
     while (need_tags) {
-      GPR_ASSERT(fixture->cq()->Next(&t, &ok));
+      CHECK(fixture->cq()->Next(&t, &ok));
       int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
-      GPR_ASSERT(need_tags & (1 << i));
+      CHECK(need_tags & (1 << i));
       need_tags &= ~(1 << i);
     }
 
-    GPR_ASSERT(recv_status.ok());
+    CHECK(recv_status.ok());
   }
 
-  fixture->Finish(state);
   fixture.reset();
   state.SetBytesProcessed(msg_size * state.iterations() * 2);
 }
@@ -232,7 +229,7 @@ static void BM_StreamingPingPongMsgs(benchmark::State& state) {
 // sendmsg syscalls for streaming by coalescing 1. initial metadata with first
 // message; 2. final streaming message with trailing metadata.
 //
-//  First parmeter (i.e state.range(0)):  Message size (in bytes) to use
+//  First parameter (i.e state.range(0)):  Message size (in bytes) to use
 //  Second parameter (i.e state.range(1)): Number of ping pong messages.
 //      Note: One ping-pong means two messages (one from client to server and
 //      the other from server to client):
@@ -298,14 +295,14 @@ static void BM_StreamingPingPongWithCoalescingApi(benchmark::State& state) {
           // initialized (async stream between client side and server side
           // established). It is necessary when client init metadata is
           // coalesced
-          GPR_ASSERT(fixture->cq()->Next(&t, &ok));
+          CHECK(fixture->cq()->Next(&t, &ok));
           while (static_cast<int>(reinterpret_cast<intptr_t>(t)) != 0) {
             // In some cases tag:2 comes before tag:0 (write tag comes out
             // first), this while loop is to make sure get tag:0.
             int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
-            GPR_ASSERT(await_tags & (1 << i));
+            CHECK(await_tags & (1 << i));
             await_tags &= ~(1 << i);
-            GPR_ASSERT(fixture->cq()->Next(&t, &ok));
+            CHECK(fixture->cq()->Next(&t, &ok));
           }
         }
 
@@ -317,8 +314,8 @@ static void BM_StreamingPingPongWithCoalescingApi(benchmark::State& state) {
         await_tags |= (1 << 5);
 
         while (await_tags != 0) {
-          GPR_ASSERT(fixture->cq()->Next(&t, &ok));
-          GPR_ASSERT(ok);
+          CHECK(fixture->cq()->Next(&t, &ok));
+          CHECK(ok);
           int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
 
           // If server recv is complete, start the server send operation
@@ -343,7 +340,7 @@ static void BM_StreamingPingPongWithCoalescingApi(benchmark::State& state) {
             }
           }
 
-          GPR_ASSERT(expect_tags & (1 << i));
+          CHECK(expect_tags & (1 << i));
           expect_tags &= ~(1 << i);
           await_tags &= ~(1 << i);
         }
@@ -368,12 +365,12 @@ static void BM_StreamingPingPongWithCoalescingApi(benchmark::State& state) {
         request_rw->WritesDone(tag(6));
         // wait for server call data structure(call_hook, etc.) to be
         // initialized, since initial metadata is corked.
-        GPR_ASSERT(fixture->cq()->Next(&t, &ok));
+        CHECK(fixture->cq()->Next(&t, &ok));
         while (static_cast<int>(reinterpret_cast<intptr_t>(t)) != 0) {
           int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
-          GPR_ASSERT(expect_tags & (1 << i));
+          CHECK(expect_tags & (1 << i));
           expect_tags &= ~(1 << i);
-          GPR_ASSERT(fixture->cq()->Next(&t, &ok));
+          CHECK(fixture->cq()->Next(&t, &ok));
         }
         response_rw.Finish(Status::OK, tag(7));
       } else {
@@ -386,21 +383,20 @@ static void BM_StreamingPingPongWithCoalescingApi(benchmark::State& state) {
       request_rw->Finish(&recv_status, tag(8));
 
       while (expect_tags) {
-        GPR_ASSERT(fixture->cq()->Next(&t, &ok));
+        CHECK(fixture->cq()->Next(&t, &ok));
         int i = static_cast<int>(reinterpret_cast<intptr_t>(t));
-        GPR_ASSERT(expect_tags & (1 << i));
+        CHECK(expect_tags & (1 << i));
         expect_tags &= ~(1 << i);
       }
 
-      GPR_ASSERT(recv_status.ok());
+      CHECK(recv_status.ok());
     }
   }
 
-  fixture->Finish(state);
   fixture.reset();
   state.SetBytesProcessed(msg_size * state.iterations() * max_ping_pongs * 2);
 }
 }  // namespace testing
 }  // namespace grpc
 
-#endif  // TEST_CPP_MICROBENCHMARKS_FULLSTACK_STREAMING_PING_PONG_H
+#endif  // GRPC_TEST_CPP_MICROBENCHMARKS_FULLSTACK_STREAMING_PING_PONG_H

@@ -18,7 +18,7 @@ Therefore, gRPC supports several major build systems, which should satisfy most 
   them.
   .
 
-* Best Effort: We do not have continous integration tests for these, but we are
+* Best Effort: We do not have continuous integration tests for these, but we are
   fairly confident that gRPC C++ would work on them. We will make our best
   effort to support them, and we welcome patches for such platforms, but we
   might need to declare bankruptcy on some issues.
@@ -30,21 +30,21 @@ Therefore, gRPC supports several major build systems, which should satisfy most 
 
 | Operating System | Architectures | Versions | Support Level |
 |------------------|---------------|----------|---------------|
-| Linux - Debian, Ubuntu, CentOS | x86, x64      | clang 6+, GCC 6.3+     | Officially Supported |
-| Windows 10+                    | x86, x64      | Visual Studio 2017+    | Officially Supported |
-| MacOS                          | x86, x64      | XCode 12+              | Officially Supported |
-| Linux - Others                 | x86, x64      | clang 6+, GCC 6.3+     | Best Effort          |
-| Linux                          | ARM           |                        | Best Effort          |
+| Linux - Debian, Ubuntu, CentOS | x86, x64      | clang 7+, GCC 7.5+     | Officially Supported |
+| Windows 10+                    | x86, x64      | Visual Studio 2022+    | Officially Supported |
+| MacOS                          | x64, ARM64    | XCode 12+              | Officially Supported |
+| Linux - Others                 | x86, x64      | clang 7+, GCC 7.5+     | Best Effort          |
+| Linux                          | ARM64         |                        | Best Effort          |
 | iOS                            |               |                        | Best Effort          |
 | Android                        |               |                        | Best Effort          |
-| Asylo                          |               |                        | Best Effort          |
+| AIX                            |               |                        | Community Supported  |
+| Asylo                          |               |                        | Community Supported  |
 | FreeBSD                        |               |                        | Community Supported  |
+| Fuchsia                        |               |                        | Community Supported  |
+| NaCL                           |               |                        | Community Supported  |
 | NetBSD                         |               |                        | Community Supported  |
 | OpenBSD                        |               |                        | Community Supported  |
-| AIX                            |               |                        | Community Supported  |
 | Solaris                        |               |                        | Community Supported  |
-| NaCL                           |               |                        | Community Supported  |
-| Fuchsia                        |               |                        | Community Supported  |
 
 ## Bazel
 
@@ -77,6 +77,17 @@ can be used for targeting the Android platform.
 
 To build gRPC C++ from source, follow the [BUILDING guide](../../BUILDING.md).
 
+To ensure all libraries in your CMake project compile with the same C++ version
+(e.g., C++17), explicitly specify the standard:
+
+```cmake
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+```
+
+This configuration enforces the use of C++17 for all targets and avoids potential
+inconsistencies or errors due to different C++ versions being used.
+
 ### find_package
 
 The canonical way to discover dependencies in CMake is the
@@ -107,7 +118,7 @@ also sets up an `add_subdirectory()` rule for you. This causes gRPC to be
 built as part of your project.
 
 ```cmake
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.16)
 project(my_project)
 
 include(FetchContent)

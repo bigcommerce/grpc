@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM php:7.2-alpine3.9
+FROM php:8.1-alpine3.18
 
 RUN apk add autoconf g++ make zlib-dev git bash wget linux-headers
 
@@ -21,8 +21,8 @@ ARG MAKEFLAGS=-j8
 
 WORKDIR /tmp
 
-RUN wget https://phar.phpunit.de/phpunit-8.5.13.phar && \
-  mv phpunit-8.5.13.phar /usr/local/bin/phpunit && \
+RUN wget https://phar.phpunit.de/phpunit-9.5.9.phar && \
+  mv phpunit-9.5.9.phar /usr/local/bin/phpunit && \
   chmod +x /usr/local/bin/phpunit
 
 
@@ -34,4 +34,6 @@ RUN pear package && \
   find . -name grpc-*.tgz | xargs -I{} pecl install {}
 
 
-CMD ["/github/grpc/src/php/bin/run_tests.sh", "--skip-persistent-channel-tests"]
+CMD ["/github/grpc/src/php/bin/run_tests.sh", "--skip-persistent-channel-tests", \
+     "--ignore-valgrind-undef-errors"]
+

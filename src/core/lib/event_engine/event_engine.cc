@@ -1,4 +1,4 @@
-// Copyright 2021 The gRPC Authors
+// Copyright 2023 The gRPC Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,60 +11,64 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#include <grpc/event_engine/event_engine.h>
 #include <grpc/support/port_platform.h>
 
-#include <atomic>
-#include <memory>
-#include <utility>
+#include "absl/strings/str_cat.h"
 
-#include "absl/functional/any_invocable.h"
+namespace grpc_event_engine::experimental {
 
-#include <grpc/event_engine/event_engine.h>
+const EventEngine::TaskHandle EventEngine::TaskHandle::kInvalid = {-1, -1};
+const EventEngine::ConnectionHandle EventEngine::ConnectionHandle::kInvalid = {
+    -1, -1};
 
-#include "src/core/lib/event_engine/default_event_engine_factory.h"
-#include "src/core/lib/event_engine/event_engine_factory.h"
-
-namespace grpc_event_engine {
-namespace experimental {
+namespace detail {
+std::string FormatHandleString(uint64_t key1, uint64_t key2) {
+  return absl::StrCat("{", absl::Hex(key1, absl::kZeroPad16), ",",
+                      absl::Hex(key2, absl::kZeroPad16), "}");
+}
+}  // namespace detail
 
 namespace {
-std::atomic<absl::AnyInvocable<std::unique_ptr<EventEngine>()>*>
-    g_event_engine_factory{nullptr};
-std::atomic<EventEngine*> g_event_engine{nullptr};
+template <typename T>
+bool eq(const T& lhs, const T& rhs) {
+  return lhs.keys[0] == rhs.keys[0] && lhs.keys[1] == rhs.keys[1];
+}
+template <typename T>
+std::ostream& printout(std::ostream& out, const T& handle) {
+  out << detail::FormatHandleString(handle.keys[0], handle.keys[1]);
+  return out;
+}
 }  // namespace
 
-void SetDefaultEventEngineFactory(
-    absl::AnyInvocable<std::unique_ptr<EventEngine>()> factory) {
-  delete g_event_engine_factory.exchange(
-      new absl::AnyInvocable<std::unique_ptr<EventEngine>()>(
-          std::move(factory)));
+bool operator==(const EventEngine::TaskHandle& lhs,
+                const EventEngine::TaskHandle& rhs) {
+  return eq(lhs, rhs);
 }
 
-std::unique_ptr<EventEngine> CreateEventEngine() {
-  if (auto* factory = g_event_engine_factory.load()) {
-    return (*factory)();
-  }
-  return DefaultEventEngineFactory();
+bool operator!=(const EventEngine::TaskHandle& lhs,
+                const EventEngine::TaskHandle& rhs) {
+  return !eq(lhs, rhs);
 }
 
-EventEngine* GetDefaultEventEngine() {
-  EventEngine* engine = g_event_engine.load(std::memory_order_acquire);
-  if (engine == nullptr) {
-    auto* created = CreateEventEngine().release();
-    if (g_event_engine.compare_exchange_strong(engine, created,
-                                               std::memory_order_acq_rel,
-                                               std::memory_order_acquire)) {
-      engine = created;
-    } else {
-      delete created;
-    }
-  }
-  return engine;
+std::ostream& operator<<(std::ostream& out,
+                         const EventEngine::TaskHandle& handle) {
+  return printout(out, handle);
 }
 
-void ResetDefaultEventEngine() {
-  delete g_event_engine.exchange(nullptr, std::memory_order_acq_rel);
+bool operator==(const EventEngine::ConnectionHandle& lhs,
+                const EventEngine::ConnectionHandle& rhs) {
+  return eq(lhs, rhs);
 }
 
-}  // namespace experimental
-}  // namespace grpc_event_engine
+bool operator!=(const EventEngine::ConnectionHandle& lhs,
+                const EventEngine::ConnectionHandle& rhs) {
+  return !eq(lhs, rhs);
+}
+
+std::ostream& operator<<(std::ostream& out,
+                         const EventEngine::ConnectionHandle& handle) {
+  return printout(out, handle);
+}
+
+}  // namespace grpc_event_engine::experimental

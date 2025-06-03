@@ -16,19 +16,24 @@
  *
  */
 
+#include <grpcpp/grpcpp.h>
+
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
 
-#include <grpc/support/log.h>
-#include <grpcpp/grpcpp.h>
+#include "absl/flags/flag.h"
+#include "absl/flags/parse.h"
+#include "absl/log/check.h"
 
 #ifdef BAZEL_BUILD
 #include "examples/protos/helloworld.grpc.pb.h"
 #else
 #include "helloworld.grpc.pb.h"
 #endif
+
+ABSL_FLAG(std::string, target, "localhost:50051", "Server address");
 
 using grpc::Channel;
 using grpc::ClientAsyncResponseReader;
@@ -83,7 +88,7 @@ class GreeterClient {
 
       // Verify that the request was completed successfully. Note that "ok"
       // corresponds solely to the request for updates introduced by Finish().
-      GPR_ASSERT(ok);
+      CHECK(ok);
 
       if (call->status.ok())
         std::cout << "Greeter received: " << call->reply.message() << std::endl;
@@ -121,12 +126,15 @@ class GreeterClient {
 };
 
 int main(int argc, char** argv) {
+  absl::ParseCommandLine(argc, argv);
   // Instantiate the client. It requires a channel, out of which the actual RPCs
-  // are created. This channel models a connection to an endpoint (in this case,
-  // localhost at port 50051). We indicate that the channel isn't authenticated
-  // (use of InsecureChannelCredentials()).
-  GreeterClient greeter(grpc::CreateChannel(
-      "localhost:50051", grpc::InsecureChannelCredentials()));
+  // are created. This channel models a connection to an endpoint specified by
+  // the argument "--target=" which is the only expected argument.
+  std::string target_str = absl::GetFlag(FLAGS_target);
+  // We indicate that the channel isn't authenticated (use of
+  // InsecureChannelCredentials()).
+  GreeterClient greeter(
+      grpc::CreateChannel(target_str, grpc::InsecureChannelCredentials()));
 
   // Spawn reader thread that loops indefinitely
   std::thread thread_ = std::thread(&GreeterClient::AsyncCompleteRpc, &greeter);

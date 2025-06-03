@@ -13,59 +13,25 @@
 # limitations under the License.
 
 load("//bazel:grpc_build_system.bzl", "grpc_cc_test", "grpc_package")
-load("//test/core/util:grpc_fuzzer.bzl", "grpc_fuzzer")
+load("//test/core/test_util:grpc_fuzzer.bzl", "grpc_fuzz_test")
 
 grpc_package(name = "test/core/slice")
 
 licenses(["notice"])
 
-grpc_fuzzer(
-    name = "b64_encode_fuzzer",
-    srcs = ["b64_encode_fuzzer.cc"],
-    corpus = "b64_encode_corpus",
-    language = "C++",
-    tags = ["no_windows"],
-    deps = [
-        "//:grpc",
-        "//test/core/util:grpc_suppressions",
-    ],
-)
-
-grpc_fuzzer(
-    name = "b64_decode_fuzzer",
-    srcs = ["b64_decode_fuzzer.cc"],
-    corpus = "b64_decode_corpus",
-    language = "C++",
-    tags = ["no_windows"],
-    deps = [
-        "//:grpc",
-        "//test/core/util:grpc_suppressions",
-    ],
-)
-
-grpc_fuzzer(
+grpc_fuzz_test(
     name = "percent_encode_fuzzer",
     srcs = ["percent_encode_fuzzer.cc"],
-    corpus = "percent_encode_corpus",
-    language = "C++",
-    tags = ["no_windows"],
-    deps = [
-        "//:gpr",
-        "//:grpc",
-        "//test/core/util:grpc_test_util",
+    external_deps = [
+        "absl/log:check",
+        "fuzztest",
+        "fuzztest_main",
     ],
-)
-
-grpc_fuzzer(
-    name = "percent_decode_fuzzer",
-    srcs = ["percent_decode_fuzzer.cc"],
-    corpus = "percent_decode_corpus",
-    language = "C++",
     tags = ["no_windows"],
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -73,13 +39,13 @@ grpc_cc_test(
     name = "percent_encoding_test",
     srcs = ["percent_encoding_test.cc"],
     external_deps = ["gtest"],
-    language = "C++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//src/core:slice",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -87,43 +53,46 @@ grpc_cc_test(
     name = "slice_test",
     srcs = ["slice_test.cc"],
     external_deps = [
+        "absl/log:log",
         "gtest",
     ],
-    language = "C++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
         "//:grpc",
-        "//:slice",
-        "//test/core/util:build",
-        "//test/core/util:grpc_suppressions",
+        "//src/core:slice",
+        "//test/core/test_util:build",
     ],
 )
 
 grpc_cc_test(
     name = "slice_string_helpers_test",
     srcs = ["slice_string_helpers_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
+    external_deps = [
+        "absl/log:log",
+        "gtest",
+    ],
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
-        "//:slice",
-        "//test/core/util:grpc_suppressions",
+        "//src/core:slice",
     ],
 )
 
 grpc_cc_test(
     name = "slice_buffer_test",
     srcs = ["slice_buffer_test.cc"],
-    external_deps = ["gtest"],
+    external_deps = [
+        "absl/log:check",
+        "gtest",
+    ],
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
     ],
 )
 
@@ -131,26 +100,12 @@ grpc_cc_test(
     name = "c_slice_buffer_test",
     srcs = ["c_slice_buffer_test.cc"],
     external_deps = ["gtest"],
-    language = "C++",
     uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
-    ],
-)
-
-grpc_cc_test(
-    name = "b64_test",
-    srcs = ["b64_test.cc"],
-    external_deps = ["gtest"],
-    language = "C++",
-    uses_event_engine = False,
-    uses_polling = False,
-    deps = [
-        "//:gpr",
-        "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//src/core:slice",
+        "//test/core/test_util:grpc_test_util",
     ],
 )

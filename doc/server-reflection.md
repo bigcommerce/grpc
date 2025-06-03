@@ -23,8 +23,8 @@ We want to be able to answer the following queries:
 Specifically, what are the names of the methods, are those methods unary or
 streaming, and what are the types of the argument and result?
 
-The first proposed version of the protocol is here:
-https://github.com/grpc/grpc/blob/master/src/proto/grpc/reflection/v1alpha/reflection.proto
+The first version of the protocol is here:
+https://github.com/grpc/grpc/blob/master/src/proto/grpc/reflection/v1/reflection.proto
 
 Note that a server is under no obligation to return a complete list of all
 methods it supports. For example, a reverse proxy may support server reflection
@@ -170,6 +170,7 @@ each language:
 - [Java](https://github.com/grpc/grpc-java/blob/master/documentation/server-reflection-tutorial.md#enable-server-reflection)
 - [Go](https://github.com/grpc/grpc-go/blob/master/Documentation/server-reflection-tutorial.md#enable-server-reflection)
 - [C++](https://grpc.io/grpc/cpp/md_doc_server_reflection_tutorial.html)
+- [C#](https://learn.microsoft.com/en-us/aspnet/core/grpc/test-tools#set-up-grpc-reflection)
 - [Python](https://github.com/grpc/grpc/blob/master/doc/python/server_reflection.md)
 - Ruby: not yet implemented [#2567](https://github.com/grpc/grpc/issues/2567)
-- Node: not yet implemented [#2568](https://github.com/grpc/grpc/issues/2568)
+- [Node](https://github.com/grpc/grpc-node/tree/master/packages/grpc-reflection)

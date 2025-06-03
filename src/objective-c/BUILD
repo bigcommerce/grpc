@@ -14,8 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("//bazel:grpc_build_system.bzl", "grpc_generate_objc_one_off_targets", "grpc_objc_library")
 load("@build_bazel_rules_apple//apple:resources.bzl", "apple_resource_bundle")
+load("//bazel:grpc_build_system.bzl", "grpc_generate_objc_one_off_targets", "grpc_objc_library")
 
 licenses(["notice"])
 
@@ -64,7 +64,6 @@ grpc_objc_library(
     hdrs = [
         "GRPCClient/GRPCCall+ChannelArg.h",
         "GRPCClient/GRPCCall+ChannelCredentials.h",
-        "GRPCClient/GRPCCall+Cronet.h",
         "GRPCClient/GRPCCall+OAuth2.h",
         "GRPCClient/GRPCCall+Tests.h",
         "GRPCClient/GRPCCallLegacy.h",
@@ -78,7 +77,7 @@ grpc_objc_library(
 grpc_objc_library(
     name = "grpc_objc_interface_types",
     srcs = [
-        "GRPCClient/GRPCTypes.m",
+        "GRPCClient/GRPCTypes.mm",
     ],
     hdrs = [
         "GRPCClient/GRPCTypes.h",
@@ -88,12 +87,12 @@ grpc_objc_library(
 grpc_objc_library(
     name = "grpc_objc_interface",
     srcs = [
-        "GRPCClient/GRPCCall.m",
-        "GRPCClient/GRPCCall+Interceptor.m",
-        "GRPCClient/GRPCCallOptions.m",
-        "GRPCClient/GRPCInterceptor.m",
-        "GRPCClient/GRPCTransport.m",
-        "GRPCClient/private/GRPCTransport+Private.m",
+        "GRPCClient/GRPCCall.mm",
+        "GRPCClient/GRPCCall+Interceptor.mm",
+        "GRPCClient/GRPCCallOptions.mm",
+        "GRPCClient/GRPCInterceptor.mm",
+        "GRPCClient/GRPCTransport.mm",
+        "GRPCClient/private/GRPCTransport+Private.mm",
     ],
     hdrs = [
         "GRPCClient/GRPCCall.h",
@@ -117,17 +116,15 @@ grpc_objc_library(
 grpc_objc_library(
     name = "grpc_objc_client",
     srcs = [
-        "GRPCClient/GRPCCall+ChannelArg.m",
-        "GRPCClient/GRPCCall+ChannelCredentials.m",
-        "GRPCClient/GRPCCall+Cronet.m",
-        "GRPCClient/GRPCCall+OAuth2.m",
-        "GRPCClient/GRPCCall+Tests.m",
-        "GRPCClient/GRPCCallLegacy.m",
-    ] + glob(["GRPCClient/private/GRPCCore/*.m"]),
+        "GRPCClient/GRPCCall+ChannelArg.mm",
+        "GRPCClient/GRPCCall+ChannelCredentials.mm",
+        "GRPCClient/GRPCCall+OAuth2.mm",
+        "GRPCClient/GRPCCall+Tests.mm",
+        "GRPCClient/GRPCCallLegacy.mm",
+    ] + glob(["GRPCClient/private/GRPCCore/*.mm"]),
     hdrs = [
         "GRPCClient/GRPCCall+ChannelArg.h",
         "GRPCClient/GRPCCall+ChannelCredentials.h",
-        "GRPCClient/GRPCCall+Cronet.h",
         "GRPCClient/GRPCCall+OAuth2.h",
         "GRPCClient/GRPCCall+Tests.h",
     ],
@@ -209,18 +206,16 @@ apple_resource_bundle(
 grpc_objc_library(
     name = "grpc_objc_client_core_internal_testing",
     srcs = [
-        "GRPCClient/GRPCCall+ChannelArg.m",
-        "GRPCClient/GRPCCall+ChannelCredentials.m",
-        "GRPCClient/GRPCCall+Cronet.m",
-        "GRPCClient/GRPCCall+OAuth2.m",
-        "GRPCClient/GRPCCall+Tests.m",
-        "GRPCClient/GRPCCallLegacy.m",
-        "GRPCClient/internal_testing/GRPCCall+InternalTests.m",
-    ] + glob(["GRPCClient/private/GRPCCore/*.m"]),
+        "GRPCClient/GRPCCall+ChannelArg.mm",
+        "GRPCClient/GRPCCall+ChannelCredentials.mm",
+        "GRPCClient/GRPCCall+OAuth2.mm",
+        "GRPCClient/GRPCCall+Tests.mm",
+        "GRPCClient/GRPCCallLegacy.mm",
+        "GRPCClient/internal_testing/GRPCCall+InternalTests.mm",
+    ] + glob(["GRPCClient/private/GRPCCore/*.mm"]),
     hdrs = [
         "GRPCClient/GRPCCall+ChannelArg.h",
         "GRPCClient/GRPCCall+ChannelCredentials.h",
-        "GRPCClient/GRPCCall+Cronet.h",
         "GRPCClient/GRPCCall+OAuth2.h",
         "GRPCClient/GRPCCall+Tests.h",
         "GRPCClient/internal_testing/GRPCCall+InternalTests.h",

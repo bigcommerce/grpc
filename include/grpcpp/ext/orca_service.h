@@ -17,19 +17,27 @@
 #ifndef GRPCPP_EXT_ORCA_SERVICE_H
 #define GRPCPP_EXT_ORCA_SERVICE_H
 
-#include <map>
-#include <string>
-
-#include "absl/time/time.h"
-#include "absl/types/optional.h"
-
-#include <grpcpp/impl/codegen/server_callback.h>
-#include <grpcpp/impl/codegen/service_type.h>
-#include <grpcpp/impl/codegen/sync.h>
+#include <grpc/event_engine/event_engine.h>
+#include <grpcpp/ext/server_metric_recorder.h>
+#include <grpcpp/impl/service_type.h>
+#include <grpcpp/impl/sync.h>
 #include <grpcpp/server_builder.h>
+#include <grpcpp/support/server_callback.h>
 #include <grpcpp/support/slice.h>
+#include <grpcpp/support/status.h>
+
+#include <cstdint>
+#include <optional>
+
+#include "absl/base/thread_annotations.h"
+#include "absl/time/time.h"
 
 namespace grpc {
+
+namespace testing {
+class OrcaServiceTest;
+}  // namespace testing
+
 namespace experimental {
 
 // RPC service implementation for supplying out-of-band backend
@@ -48,33 +56,30 @@ class OrcaService : public Service {
     }
   };
 
-  explicit OrcaService(Options options);
-
-  // Sets or removes the CPU utilization value to be reported to clients.
-  void SetCpuUtilization(double cpu_utilization);
-  void DeleteCpuUtilization();
-
-  // Sets of removes the memory utilization value to be reported to clients.
-  void SetMemoryUtilization(double memory_utilization);
-  void DeleteMemoryUtilization();
-
-  // Sets or removed named utilization values to be reported to clients.
-  void SetNamedUtilization(std::string name, double utilization);
-  void DeleteNamedUtilization(const std::string& name);
-  void SetAllNamedUtilization(std::map<std::string, double> named_utilization);
+  // ServerMetricRecorder is required.
+  OrcaService(ServerMetricRecorder* const server_metric_recorder,
+              Options options);
 
  private:
+  class ReactorHook {
+   public:
+    virtual ~ReactorHook() = default;
+    virtual void OnFinish(grpc::Status status) = 0;
+    virtual void OnStartWrite(const ByteBuffer* response) = 0;
+  };
+
   class Reactor;
+  friend class testing::OrcaServiceTest;
 
   Slice GetOrCreateSerializedResponse();
 
+  const ServerMetricRecorder* const server_metric_recorder_;
   const absl::Duration min_report_duration_;
-
   grpc::internal::Mutex mu_;
-  double cpu_utilization_ ABSL_GUARDED_BY(&mu_) = -1;
-  double memory_utilization_ ABSL_GUARDED_BY(&mu_) = -1;
-  std::map<std::string, double> named_utilization_ ABSL_GUARDED_BY(&mu_);
-  absl::optional<Slice> response_slice_ ABSL_GUARDED_BY(&mu_);
+  // Contains the last serialized metrics from server_metric_recorder_.
+  std::optional<Slice> response_slice_ ABSL_GUARDED_BY(mu_);
+  // The update sequence number of metrics serialized in response_slice_.
+  std::optional<uint64_t> response_slice_seq_ ABSL_GUARDED_BY(mu_);
 };
 
 }  // namespace experimental

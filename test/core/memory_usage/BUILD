@@ -20,17 +20,32 @@ licenses(["notice"])
 
 grpc_cc_library(
     name = "memstats",
-    testonly = 1,
+    srcs = [
+        "memstats.cc",
+        "memstats.h",
+    ],
     hdrs = ["memstats.h"],
+    external_deps = [
+        "absl/log:check",
+    ],
+    tags = [
+        "bazel_only",
+        "no_mac",
+        "no_windows",
+    ],
+    deps = [
+        "//:gpr",
+    ],
 )
 
 grpc_cc_binary(
     name = "memory_usage_client",
-    testonly = 1,
     srcs = ["client.cc"],
     external_deps = [
         "absl/flags:flag",
         "absl/flags:parse",
+        "absl/log:check",
+        "absl/log:log",
     ],
     tags = [
         "bazel_only",
@@ -41,17 +56,23 @@ grpc_cc_binary(
         ":memstats",
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//src/core:channel_args",
+        "//src/core:chaotic_good",
+        "//src/core:chaotic_good_connector",
+        "//src/core:endpoint_transport",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )
 
 grpc_cc_binary(
     name = "memory_usage_server",
-    testonly = 1,
     srcs = ["server.cc"],
     external_deps = [
         "absl/flags:flag",
         "absl/flags:parse",
+        "absl/log:check",
+        "absl/log:log",
     ],
     tags = [
         "bazel_only",
@@ -62,34 +83,124 @@ grpc_cc_binary(
         ":memstats",
         "//:gpr",
         "//:grpc",
+        "//src/core:channel_args",
+        "//src/core:chaotic_good",
+        "//src/core:chaotic_good_server",
+        "//src/core:endpoint_transport",
+        "//src/core:xds_enabled_server",
         "//test/core/end2end:ssl_test_data",
-        "//test/core/util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
     ],
 )
 
-grpc_cc_test(
-    name = "memory_usage_test",
-    srcs = ["memory_usage_test.cc"],
-    data = [
-        ":memory_usage_client",
-        ":memory_usage_server",
-    ],
+grpc_cc_binary(
+    name = "memory_usage_callback_client",
+    srcs = ["callback_client.cc"],
     external_deps = [
-        "absl/algorithm:container",
         "absl/flags:flag",
         "absl/flags:parse",
+        "absl/log:check",
+        "absl/log:log",
+        "absl/time",
     ],
-    language = "C++",
     tags = [
         "bazel_only",
         "no_mac",
         "no_windows",
     ],
-    uses_event_engine = False,
-    uses_polling = False,
+    deps = [
+        ":memstats",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//src/core:chaotic_good",
+        "//src/core:endpoint_transport",
+        "//src/proto/grpc/testing:benchmark_service_cc_grpc",
+        "//test/core/end2end:ssl_test_data",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
+    ],
+)
+
+grpc_cc_binary(
+    name = "memory_usage_callback_server",
+    srcs = ["callback_server.cc"],
+    external_deps = [
+        "absl/flags:flag",
+        "absl/log:log",
+        "absl/flags:parse",
+        "absl/log:check",
+    ],
+    tags = [
+        "bazel_only",
+        "no_mac",
+        "no_windows",
+    ],
+    deps = [
+        ":memstats",
+        "//:gpr",
+        "//:grpc",
+        "//:grpc++",
+        "//src/core:chaotic_good",
+        "//src/core:endpoint_transport",
+        "//src/proto/grpc/testing:benchmark_service_cc_grpc",
+        "//test/core/end2end:ssl_test_data",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
+    ],
+)
+
+MEMORY_USAGE_DATA = [
+    ":memory_usage_callback_client",
+    ":memory_usage_callback_server",
+    ":memory_usage_client",
+    ":memory_usage_server",
+]
+
+MEMORY_USAGE_TAGS = [
+    "bazel_only",
+    "no_mac",
+    "no_windows",
+]
+
+grpc_cc_test(
+    name = "memory_usage_test",
+    srcs = ["memory_usage_test.cc"],
+    data = MEMORY_USAGE_DATA,
+    external_deps = [
+        "absl/algorithm:container",
+        "absl/flags:flag",
+        "absl/flags:parse",
+        "absl/log:log",
+    ],
+    tags = MEMORY_USAGE_TAGS,
     deps = [
         "//:gpr",
         "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//:subprocess",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
+        "//test/cpp/end2end/xds:xds_utils",
+    ],
+)
+
+grpc_cc_binary(
+    name = "memory_usage",
+    srcs = ["memory_usage_test.cc"],
+    data = MEMORY_USAGE_DATA,
+    external_deps = [
+        "absl/algorithm:container",
+        "absl/flags:flag",
+        "absl/flags:parse",
+    ],
+    tags = MEMORY_USAGE_TAGS,
+    deps = [
+        "//:gpr",
+        "//:grpc",
+        "//:subprocess",
+        "//test/core/test_util:grpc_test_util",
+        "//test/core/test_util:grpc_test_util_base",
+        "//test/cpp/end2end/xds:xds_utils",
     ],
 )
