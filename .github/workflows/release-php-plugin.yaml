@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             artifact: grpc_php_plugin-linux-amd64
           - os: macos-latest
             artifact: grpc_php_plugin-darwin-arm64
@@ -44,4 +44,5 @@ jobs:
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
             cmake/build/${{ matrix.artifact }}.zip \
-            --repo ${{ github.repository }}
+            --repo ${{ github.repository }} \
+            --clobber
