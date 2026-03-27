@@ -27,10 +27,15 @@ jobs:
         run: |
           mkdir -p cmake/build
           cd cmake/build
-          cmake ../.. \
-            -DgRPC_BUILD_TESTS=OFF \
-            -DgRPC_BUILD_GRPC_PHP_PLUGIN=ON \
+          cmake_args=(
+            -DgRPC_BUILD_TESTS=OFF
+            -DgRPC_BUILD_GRPC_PHP_PLUGIN=ON
             -DCMAKE_BUILD_TYPE=Release
+          )
+          if [ "$(uname)" = "Linux" ]; then
+            cmake_args+=("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc")
+          fi
+          cmake ../.. "${cmake_args[@]}"
           make -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu) grpc_php_plugin
 
       - name: Package binary
