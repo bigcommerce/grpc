@@ -1,0 +1,48 @@
+name: Release PHP Plugin
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: grpc_php_plugin-linux-amd64
+          - os: macos-latest
+            artifact: grpc_php_plugin-darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          submodules: true
+
+      - name: Build grpc_php_plugin
+        run: |
+          mkdir -p cmake/build
+          cd cmake/build
+          cmake ../.. \
+            -DgRPC_BUILD_TESTS=OFF \
+            -DgRPC_BUILD_GRPC_PHP_PLUGIN=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc 2>/dev/null || sysctl -n hw.logicalcpu) grpc_php_plugin
+
+      - name: Package binary
+        run: |
+          cd cmake/build
+          zip ${{ matrix.artifact }}.zip grpc_php_plugin
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            cmake/build/${{ matrix.artifact }}.zip \
+            --repo ${{ github.repository }} \
+            --clobber

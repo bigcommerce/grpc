@@ -292,6 +292,32 @@ void PrintService(const ServiceDescriptor* service,
   out->Print(vars, "class $name$ $extends${\n\n");
   out->Indent();
   out->Indent();
+
+  out->Print("public function getExpectedResponseMessages() {\n");
+  out->Indent();
+  out->Print("return [\n");
+  out->Indent();
+  map<std::string, std::string> response_vars;
+  for (int i = 0; i < service->method_count(); i++) {
+    const Descriptor* output_type = service->method(i)->output_type();
+    response_vars["method_name"] = grpc_generator::LowercaseFirstLetter(std::string(service->method(i)->name()));
+    response_vars["output_type_id"] = MessageIdentifierName(GeneratedClassName(output_type), output_type->file());
+    out->Print(response_vars, "'$method_name$' => '\\$output_type_id$',\n");
+  }
+  out->Outdent();
+  out->Print("];\n");
+  out->Outdent();
+  out->Print("}\n\n");
+
+  // getServiceName() -> string - The name of the gRPC service
+  map<std::string, std::string> service_vars;
+  service_vars["service_name"] = service->full_name();
+  out->Print("public function getServiceName() {\n");
+  out->Indent();
+  out->Print(service_vars, "return '$service_name$';\n");
+  out->Outdent();
+  out->Print("}\n\n");
+
   if (!is_server) {
     out->Print(
         "/**\n * @param string $$hostname hostname\n"
